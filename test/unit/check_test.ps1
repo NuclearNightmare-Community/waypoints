@@ -90,7 +90,7 @@ $probe = (Start-Log 'probe') + @(
     (Dr 'OK REPRO after RemoveAllWidgets no waypoint is painted (0 painted): the bug, and the paint hook sees it'),
     (Dr 'ANSWER repair rerun-beginplay(B)=not-drawn respawn(C)=drawn respawn(Satellite)=drawn toggle-space(A)=drawn'),
     (Dr 'OK RESPAWN-DRAWN a respawned waypoint is painted again (Markers'' way)'),
-    (Dr 'OK LIVENESS a waypoint destroyed by its flag is not counted alive (FindAllOf=1, alive=0)'), $endPass)
+    (Dr 'OK LIVENESS a waypoint destroyed by its flag is not counted alive (FindAllOf=1, alive=0)'), (Dr 'OK LIVEOK the 4 live markers are all still counted alive (4)'), $endPass)
 Expect $probe 'probe' 0 'probe: passes as written' 'All checks passed'
 Expect $probe 'probe' 0 'probe: prints the answers' 'ANSWER repair'
 Expect ($probe + @(M "REVIVE pawn=$P2 was=$P1 snapshot=4 onRevive=restore") + (Restored)) 'probe' 1 'probe: any revive action -> fails' 'REVIVE'

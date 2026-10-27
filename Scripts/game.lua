@@ -37,10 +37,19 @@ local function text(t) local ok, s = pcall(function() return t:ToString() end) r
 -- A live actor: a valid object not being destroyed. FindAllOf also returns actors destroyed since the last garbage
 -- collection (a flag the player switched off a minute ago); the game's own GetAllActorsOfClass skips those, and so
 -- does this.
+-- In game (VM probe run 2, V8.1.2): after its flag destroyed it, a waypoint actor still has
+-- IsActorBeingDestroyed() == false and UE4SS's IsValid() == true, but UE's own IsValid
+-- (UKismetSystemLibrary::IsValid, which checks the garbage flag) is false, and GetAllActorsOfClass skips it.
+local KSL_ISVALID, KSL_CDO = "/Script/Engine.KismetSystemLibrary:IsValid", "/Script/Engine.Default__KismetSystemLibrary"
 function M.alive(a)
     if not valid(a) then return false end
     local ok, dying = pcall(function() return a:IsActorBeingDestroyed() end)
-    return not (ok and dying == true)
+    if ok and dying == true then return false end
+    -- Both objects exist for the whole session, so these lookups hit (no full scan). Called as the UFunction itself:
+    -- KSL:IsValid(...) would reach UE4SS's own IsValid method instead.
+    local okK, live = pcall(function() return E.StaticFindObject(KSL_ISVALID)(E.StaticFindObject(KSL_CDO), a) end)
+    if okK and live == false then return false end
+    return true
 end
 
 local function findAll(short)

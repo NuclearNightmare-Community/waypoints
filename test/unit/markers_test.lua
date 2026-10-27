@@ -49,6 +49,13 @@ do
     local keys = {} for _, s in ipairs(snap) do keys[#keys + 1] = s.key end
     eq(table.concat(keys, ","), "medbay,airport,#satellite", "snapshot: keys, satellite as #satellite")
     ok(snap[1].obj == nil and snap[1].loc.X == 100, "snapshot: plain data with the location, no UObject")
+    ok(W.kslCalls > 0, "waypoints: liveness asks UE's IsValid (KismetSystemLibrary), not only IsActorBeingDestroyed")
+    W.off._dying = false; W.off._beingDestroyed = true
+    eq(#game.waypoints(WORLD), 3, "waypoints: an actor being destroyed is skipped too")
+    W.off._dying = true; W.off._beingDestroyed = false
+    W.kslBroken = true
+    eq(#game.waypoints(WORLD), 4, "waypoints: if UE's IsValid can't be called, a destroyed actor isn't detected (documented risk), nothing breaks")
+    W.kslBroken = false
     local other = W.world("/Game/Maps/ForestMap/ForestMap.ForestMap")
     W.waypoint("location", "Lumber Yard", nil, nil, other)
     eq(#game.waypoints(WORLD), 3, "waypoints: another world's actor is not this world's marker")
