@@ -90,6 +90,7 @@ With `-Target vm`, core comes from `mods/Nucleus/build/package` and Markers plus
 - Death: `ExplosionDamage` from Lua didn't kill; `DeathEvent()` did. The player became a `Spectator_C`, the waypoint actors survived, Markers took its snapshot and did nothing else.
 - Revive (through the radio's own code): `LOST` → `REVIVE` → `RESTORED n=3` about 1.3 s later, every waypoint bound to the new pawn and painted, the map showing exactly those flags; then with `clear`: `CLEARED n=3`, nothing painted, no flag selected.
 - The snapshot at `lost` costs about 2 ms inside core's HUD tick (a soft `hud slow tick ... HUD event: lost` warning).
+- The match's landing showcase: about 5 s after the pawn and HUD are up, the game state's `UpdateHeliVis` puts the view on the landing helicopter's camera for 9 s and blends back over 3 s. A paint check in that time aims the control rotation but not the rendered camera, so markers out of the helicopter's view read 0 (the flaky `DRAWN before` of 2026-10-27). The driver now waits for the view to be back on the pawn (`VIEW`, `HUD` lines), re-aims every tick and counts a marker's window only if the rendered camera stayed within 10° of it (`AIM` lines; up to 4 tries). After the fix, revive passed 3 times in a row in the VM.
 
 ### Two-player scenarios (the real revive; need tools/vm/pair.ps1)
 

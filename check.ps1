@@ -182,7 +182,7 @@ if ($Scenario -notin 'no-core', 'old-core', 'pair-host') {
 }
 if ($Scenario -in 'probe', 'revive', 'pair-victim', 'pair-hostvictim') {
     Write-Host '--- answers ---'
-    $lines | Where-Object { $_ -match "\[$D\] (ANSWER|MAPOPEN|PAINT|LIVENESS|REPAIR|RESPAWN|JOURNAL) " } | ForEach-Object { Write-Host ($_ -replace '^.*\[MarkersDriver\] ', '') }
+    $lines | Where-Object { $_ -match "\[$D\] (ANSWER|MAPOPEN|PAINT|AIM|LIVENESS|REPAIR|RESPAWN|JOURNAL) " } | ForEach-Object { Write-Host ($_ -replace '^.*\[MarkersDriver\] ', '') }
 }
 
 if ($failed) { Write-Host "$failed check(s) failed."; exit 1 }
