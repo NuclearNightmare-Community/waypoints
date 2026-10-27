@@ -98,17 +98,26 @@ A solo player can't be revived (the last death ends the match), so the real thin
 
 | Scenario | Host A (this PC) | Client B (VM) | Judged by |
 |---|---|---|---|
-| `mk-client` | MarkersDriver `pair-host` only (no Markers): waits, kills B's character (`ExplosionDamage` on the host), calls `BP_Radio_C:Reinformant()` (the computer's "call reinforcement") | Nucleus + Markers + MarkersDriver `pair-victim`: marks 2 flags + satellite, dies, is revived; then the revive checks | `check.ps1 -Scenario pair-victim` (VM log), `-Scenario pair-host` (host log) |
+| `mk-client` | MarkersDriver `pair-host` only (no Markers): waits, kills B's character (its `DeathEvent()`, called on the host), calls `BP_Radio_C:Reinformant()` (the computer's "call reinforcement") | Nucleus + Markers + MarkersDriver `pair-victim`: marks 2 flags + satellite, dies, is revived; then the revive checks | `check.ps1 -Scenario pair-victim` (VM log), `-Scenario pair-host` (host log) |
 | `mk-host` | Nucleus + Markers + MarkersDriver `pair-hostvictim`: marks, dies, reinforces itself | vanilla (UE4SS off), stays alive | `check.ps1 -Scenario pair-hostvictim` (host log) |
 
-`pair.ps1` needs two small additions first (described at the top of `markers-scenarios.ps1`): a `-ScenarioFile` parameter, and `HostModPaths` (install mod folders from any path into the host copy for the run). Then:
+`pair.ps1` loads this file with `-ScenarioFile` and installs the host's mods with the scenario's `HostModPaths` (for the run only; removed afterwards, also by `-Stop`). Before running:
+- core is built (`mods/Nucleus/build/package`; `mods/Nucleus/build.ps1`, not while a game runs);
+- the host copy has no Markers, MarkersDriver or Nucleus of its own (`mk-client`'s Prereq and `pair.ps1` both refuse otherwise; take them out with their `deploy.ps1 -Remove`);
+- the VM is set up as in the workspace's `tools/vm/README.md` (B signed in), nothing else uses it (`dumps/vm.lock`), and nobody plays on the host: `pair.ps1` waits until no Nuclear Nightmare runs on this PC.
+
+From the workspace's main checkout, one at a time:
 
 ```powershell
 ./tools/vm/pair.ps1 -Scenario mk-client -ScenarioFile mods/markers/test/pair/markers-scenarios.ps1
 ./tools/vm/pair.ps1 -Scenario mk-host   -ScenarioFile mods/markers/test/pair/markers-scenarios.ps1
+# after an aborted run (closes both games, puts the host and VM copies back):
+./tools/vm/pair.ps1 -Stop -Scenario mk-client -ScenarioFile mods/markers/test/pair/markers-scenarios.ps1
 ```
 
-The victim must die neither drowned nor infected (or it becomes a monster: `pair-host` then fails as inconclusive). The hand check above is the fallback.
+Each run writes `dumps/<copy>/pair/<label>.json` (its `ScenarioReport` holds the `check.ps1` results, `ScenarioVerdict` PASS/FAIL) and the host log next to it; the VM log and screenshots (`marked`, `dead`, `revived`; `host-dead`, `after`) go to `dumps/<copy>/vm/`. To re-judge by hand: `./check.ps1 -Log <vm log> -Scenario pair-victim -Target vm`, `./check.ps1 -Log <host log> -Scenario pair-host` (or `pair-hostvictim`). Without the game: the workspace's `tools/vm/tests/pair-scenariofile.tests.ps1 -StageMarkers` loads this file and stages every role.
+
+The kill is the character's own `DeathEvent()` (`ExplosionDamage` didn't kill in the VM), once more after 5 s if the character is still possessed. In `mk-client` the host calls it on B's character; that path (a remote pawn) is untested, and the decompile suggests the event's first branch does the local-player work: if B doesn't die, the host log shows `KILL victim ... DeathEvent again` and `pair-host` fails with a TIMEOUT on "the victim's death". The victim must die neither drowned nor infected (or it becomes a monster: `pair-host` then fails as inconclusive). The hand check above is the fallback.
 
 ## Known risks
 

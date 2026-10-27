@@ -20,7 +20,7 @@
 --            Revive 1 with onRevive=restore: one actor per marker, bound to the new pawn, painted, bReplicates false,
 --            the flags match; same Journal instance? Then the driver rewrites Markers' settings.lua to onRevive=clear
 --            (read at every revive) and revive 2: no waypoint, no flag selected.
---   death:   solo host: markers up, then the player dies (ExplosionDamage on itself; DeathEvent as fallback): spectator,
+--   death:   solo host: markers up, then the player dies (DeathEvent() on itself): spectator,
 --            the waypoints keep existing, Markers takes its snapshot and does nothing else.
 --   no-core, old-core: in a match: nothing from Markers (check.ps1 judges its one line).
 --   pair-victim:     (B, a client in the VM) marks, is killed by the host, is revived by the host's radio; then the
@@ -581,23 +581,25 @@ local function setOnRevive(value)
     end)
 end
 
--- Kills a character on the host (authority): the game's own explosion damage; DeathEvent if it's still alive later.
+-- Kills a character on the host (authority) through the character's own DeathEvent() (what its HealthDeath delegate
+-- calls). ExplosionDamage from Lua didn't kill in the VM; DeathEvent did. Still possessed 5 s later: DeathEvent once
+-- more (the event keeps a HasCalledDeathEvent? flag and takes another branch on a second call).
 local function kill(phase, which)
     step(phase .. ": kill", function()
         local target = which()
         if not target then check(false, "KILL %s target found", phase) return end
         S.killed = pathOf(target)
-        local ok, err = pcall(function() target:ExplosionDamage(target, 10000.0) end)
-        say("KILL %s %s ExplosionDamage ok=%s %s", phase, S.killed, tostring(ok), ok and "" or tostring(err))
+        local ok, err = pcall(function() target:DeathEvent() end)
+        say("KILL %s %s DeathEvent ok=%s %s", phase, S.killed, tostring(ok), ok and "" or tostring(err))
         return after(5), 10, "death"
     end)
-    step(phase .. ": kill fallback", function()
+    step(phase .. ": kill again", function()
         local t = found(S.killed)
         local stillPossessed = false
         for _, c in ipairs(FindAllOf("PlayerController") or {}) do if valid(c) and pawnOf(c) and pathOf(pawnOf(c)) == S.killed then stillPossessed = true end end
         if t and stillPossessed then
             local ok, err = pcall(function() t:DeathEvent() end)
-            say("KILL %s still possessed after 5 s: DeathEvent ok=%s %s", phase, tostring(ok), ok and "" or tostring(err))
+            say("KILL %s still possessed after 5 s: DeathEvent again ok=%s %s", phase, tostring(ok), ok and "" or tostring(err))
         end
     end)
 end

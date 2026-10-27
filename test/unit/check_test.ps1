@@ -99,7 +99,7 @@ Expect (Without $probe 'ANSWER construct') 'probe' 1 'probe: no construct answer
 
 # ---------------------------------------------------------------- death
 $death = (Start-Log 'death') + @(
-    (Dr 'OK MARKED mark 3 markers, one waypoint actor each (A,B,Satellite)'), (Dr "KILL death $P1 ExplosionDamage ok=true "),
+    (Dr 'OK MARKED mark 3 markers, one waypoint actor each (A,B,Satellite)'), (Dr "KILL death $P1 DeathEvent ok=true "),
     (M "LOST pawn=$P1 snapshot n=3 (locations 2, satellite 1)"),
     (M 'PAWN /Game/Maps/SmallLoweIsland/SmallMap.SmallMap:PersistentLevel.Spectator_C_1 (Spectator_C) is not a first-person character: not a revive'),
     (Dr 'OK DEAD the player no longer controls its first-person character'), (Dr 'OK KEPT the waypoint actors survive the death (3 of 3)'),
@@ -127,7 +127,7 @@ Expect $victim 'pair-victim' 0 'pair-victim: passes as written' 'All checks pass
 Expect (Without $victim 'OK DRAWN revive') 'pair-victim' 1 'pair-victim: not drawn after the revive -> fails' 'DRAWN'
 $hostv = ($victim -replace 'SCENARIO pair-victim', 'SCENARIO pair-hostvictim')
 Expect $hostv 'pair-hostvictim' 0 'pair-hostvictim: passes as written' 'All checks passed'
-$pairHost = @((Dr 'SCENARIO pair-host'), (Dr 'KILL victim x ExplosionDamage ok=true '), (Dr 'VICTIM after death pawn class=Spectator_C'),
+$pairHost = @((Dr 'SCENARIO pair-host'), (Dr 'KILL victim x DeathEvent ok=true '), (Dr 'VICTIM after death pawn class=Spectator_C'),
     (Dr 'REINFORCE radio:Reinformant() ok=true '), (Dr "OK REVIVED the victim has a new first-person character $P2"), $endPass)
 Expect $pairHost 'pair-host' 0 'pair-host: passes as written' 'All checks passed'
 Expect ($pairHost -replace 'class=Spectator_C', 'class=BP_ThirdPersonCharacter_C') 'pair-host' 1 'pair-host: victim became a monster -> fails (inconclusive)' 'BP_ThirdPersonCharacter_C'
