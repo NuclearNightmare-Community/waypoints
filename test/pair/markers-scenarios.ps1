@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Markers' two-player scenarios for tools/vm/pair.ps1 (the workspace's pair tooling): the real revive, which a solo
-  player can't have (the last player's death ends the match). Ready to run; NOT RUN yet.
+  player can't have (the last player's death ends the match). Run on 2026-10-27: mk-client and mk-host PASS (README, "Results").
 .DESCRIPTION
   A -ScenarioFile for pair.ps1: dot-sourced by it after its own pair-scenarios.ps1, in the same shape (Summary,
   Prereq, VMSetup, VMRestore, BeforeJoin, AfterJoin, PlaySec, LobbyMinutes, Check, HostModPaths), and adds mk-client
@@ -93,7 +93,7 @@ $script:MarkersPairScenarios = @{
             Write-Host "Kill signal written to the VM: $sig"
             $script:LastAction = @{ Name = 'kill signal'; Time = Get-Date }
             Save-ShotAt -Seconds 15 -Name 'dead' -Expect 'B dead (spectator view or death screen); no waypoints'
-            Wait-HostLine '\[MarkersDriver\] OK REVIVED ' 300 | Out-Null
+            Wait-HostLine '\[MarkersDriver\] OK REVIVED ' 300 | Out-Null; $script:LastAction = @{ Name = 'host OK REVIVED'; Time = Get-Date }   # shots count from the last action
             Save-ShotAt -Seconds 10 -Name 'revived' -Expect 'B revived: the same 3 waypoints on screen with distances, white (bound to the live pawn)'
         }
         PlaySec = 60; LobbyMinutes = 1
@@ -109,9 +109,9 @@ $script:MarkersPairScenarios = @{
         VMSetup = { Restore-VMBaseline }
         VMRestore = { Restore-VMBaseline }
         AfterJoin = {
-            Wait-HostLine '\[MarkersDriver\] KILL death ' 900 | Out-Null
+            Wait-HostLine '\[MarkersDriver\] KILL death ' 900 | Out-Null; $script:LastAction = @{ Name = 'host KILL death'; Time = Get-Date }
             Save-ShotAt -Seconds 5 -Name 'host-dead' -Expect 'B (vanilla) still playing; nothing unusual on B''s screen'
-            Wait-HostLine '\[MarkersDriver\] END result=' 400 | Out-Null
+            Wait-HostLine '\[MarkersDriver\] END result=' 400 | Out-Null; $script:LastAction = @{ Name = 'host END'; Time = Get-Date }
             Save-ShotAt -Seconds 2 -Name 'after' -Expect 'B (vanilla): its own markers (if any) unchanged; no notification or chat from the mod'
         }
         PlaySec = 60; LobbyMinutes = 1
