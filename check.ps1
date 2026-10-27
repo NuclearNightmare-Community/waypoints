@@ -81,7 +81,7 @@ $expect = @{
     'probe' = $driven + @(
         "\[$C\] PAWN first "
         $noAction
-        "\[$D\] OK MARKED mark 4 markers", "\[$D\] OK DRAWN before ", "\[$D\] OK REPRO ", "\[$D\] OK RESPAWN-DRAWN ", "\[$D\] OK LIVENESS "
+        "\[$D\] OK MARKED mark 4 markers", "\[$D\] OK DRAWN before ", "\[$D\] OK REPRO ", "\[$D\] OK RESPAWN-DRAWN ", "\[$D\] OK LIVENESS ", "\[$D\] OK LIVEOK "
         "\[$D\] ANSWER construct-every-open=(yes|no|unknown) ", "\[$D\] ANSWER repair "
     )
     'revive' = $driven + @(
