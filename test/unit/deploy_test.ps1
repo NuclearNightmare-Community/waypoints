@@ -1,0 +1,219 @@
+<#
+.SYNOPSIS
+  Unit tests for deploy-lib.ps1 (caret ranges, mods.txt editing, settings.lua) and deploy.ps1 end to end against a
+  fake game instance in a temp folder (never a real copy: no game, no UE4SS, only the files deploy.ps1 looks at).
+.EXAMPLE
+  pwsh -NoProfile -File test/unit/deploy_test.ps1
+#>
+$ErrorActionPreference = 'Stop'
+$repo = Split-Path (Split-Path $PSScriptRoot)
+. (Join-Path $repo 'deploy-lib.ps1')
+$script:passed = 0; $script:failed = 0
+function Ok([bool] $cond, [string] $name, $detail) {
+    if ($cond) { $script:passed++ } else { $script:failed++; Write-Host "FAIL $name$(if ($null -ne $detail) { " -- $detail" })" }
+}
+function Eq($got, $want, [string] $name) { Ok ($got -eq $want) $name "got '$got', want '$want'" }
+function Throws([scriptblock] $b, [string] $text, [string] $name) {
+    try { & $b; Ok $false $name 'did not throw' } catch { Ok ($_.Exception.Message -like "*$text*") $name $_.Exception.Message }
+}
+
+# ---------------------------------------------------------------- caret ranges (same cases as core's semver.lua rule)
+$cases = @(
+    @('0.2.0', '^0.2.0', $true), @('0.2.1', '^0.2.0', $true), @('0.2.10', '^0.2.3', $true), @('0.2.2', '^0.2.3', $false),
+    @('0.1.0', '^0.2.0', $false), @('0.3.0', '^0.2.0', $false), @('1.2.0', '^0.2.0', $false),
+    @('1.0.0', '^1.0.0', $true), @('1.4.0', '^1.2.3', $true), @('1.2.3', '^1.2.3', $true), @('1.2.2', '^1.2.3', $false),
+    @('1.1.9', '^1.2.0', $false), @('2.0.0', '^1.2.0', $false), @('1.10.0', '^1.9.0', $true),
+    @('0.0.3', '^0.0.3', $true), @('0.0.4', '^0.0.3', $true), @('0.1.3', '^0.0.3', $false),
+    @('0.2', '^0.2.0', $false), @('0.2.0-beta', '^0.2.0', $false), @('v0.2.0', '^0.2.0', $false), @(' 0.2.0', '^0.2.0', $false),
+    @('', '^0.2.0', $false), @($null, '^0.2.0', $false), @(2, '^0.2.0', $false), @('00.2.0', '^0.2.0', $true)
+)
+foreach ($c in $cases) { Eq (Test-CaretRange -Version $c[0] -Range $c[1]) $c[2] "caret: '$($c[0])' satisfies '$($c[1])'" }
+Throws { Test-CaretRange -Version '0.2.0' -Range '0.2.0' } 'unsupported version range' 'caret: a range without ^ throws'
+Throws { Test-CaretRange -Version '0.2.0' -Range '~0.2.0' } 'unsupported version range' 'caret: ~ throws'
+Throws { Test-CaretRange -Version '0.2.0' -Range '^0.2' } 'unsupported version range' 'caret: short range throws'
+Eq ((ConvertTo-Semver '1.2.3').Minor) 2 'semver: parse'
+Ok ($null -eq (ConvertTo-Semver '1.2.3.4')) 'semver: four parts is not a version'
+
+# ---------------------------------------------------------------- mods.txt editing
+$stock = @('CheatManagerEnablerMod : 1', 'ActorDumperMod : 0', 'BPModLoaderMod : 1', 'Keybinds : 1', '', '; comment')
+$withCore = @('Nucleus : 1') + $stock
+$r = Edit-ModsTxt -Lines $withCore -Add @('Markers') -After 'Nucleus'
+Eq ($r -join '|') (@('Nucleus : 1', 'Markers : 1') + $stock -join '|') 'mods.txt: Markers right below Nucleus'
+$r = Edit-ModsTxt -Lines $withCore -Add @('MarkersDriver', 'Markers') -After 'Nucleus'
+Eq ($r -join '|') (@('Nucleus : 1', 'MarkersDriver : 1', 'Markers : 1') + $stock -join '|') 'mods.txt: driver then Markers below Nucleus'
+$above = @('Markers : 1') + $withCore
+$r = Edit-ModsTxt -Lines $above -Add @('Markers') -After 'Nucleus'
+Eq ($r -join '|') (@('Nucleus : 1', 'Markers : 1') + $stock -join '|') 'mods.txt: a Markers line above Nucleus moves below it (story 1 AC 6)'
+$twice = @('Nucleus : 1', 'Markers : 0', 'BPModLoaderMod : 1', '  Markers:1', 'Keybinds : 1')
+$r = Edit-ModsTxt -Lines $twice -Add @('Markers') -After 'Nucleus'
+Eq ($r -join '|') 'Nucleus : 1|Markers : 1|BPModLoaderMod : 1|Keybinds : 1' 'mods.txt: every old Markers line (disabled, spaced) replaced by one'
+$r = Edit-ModsTxt -Lines $stock -Add @('Markers') -After 'Nucleus'
+Eq ($r[3]) 'Markers : 1' 'mods.txt: no Nucleus line -> above Keybinds'
+Eq ($r[4]) 'Keybinds : 1' 'mods.txt: ... Keybinds still follows'
+$late = @('BPModLoaderMod : 1', 'Keybinds : 1', 'Nucleus : 1')
+$r = Edit-ModsTxt -Lines $late -Add @('Markers') -After 'Nucleus'
+Eq ($r -join '|') 'BPModLoaderMod : 1|Markers : 1|Keybinds : 1|Nucleus : 1' 'mods.txt: Nucleus below Keybinds -> Markers still above Keybinds'
+$r = Edit-ModsTxt -Lines @('A : 1') -Add @('Markers') -After 'Nucleus'
+Eq ($r -join '|') 'A : 1|Markers : 1' 'mods.txt: no Keybinds line at all -> at the end'
+$r = Edit-ModsTxt -Lines @('Nucleus : 1', 'MarkersDriver : 1', 'Markers : 1', 'Markerswork : 1', 'Keybinds : 1') -Remove @('Markers', 'MarkersDriver')
+Eq ($r -join '|') 'Nucleus : 1|Markerswork : 1|Keybinds : 1' 'mods.txt: remove only Markers and MarkersDriver (not Markerswork)'
+$r = Edit-ModsTxt -Lines @() -Remove @('Markers')
+Eq $r.Count 0 'mods.txt: empty stays empty'
+Eq (Get-ModsTxtState -Lines $withCore -Name 'Nucleus') 'enabled' 'state: enabled'
+Eq (Get-ModsTxtState -Lines @('Nucleus : 0') -Name 'Nucleus') 'disabled' 'state: disabled'
+Eq (Get-ModsTxtState -Lines $stock -Name 'Nucleus') 'absent' 'state: absent'
+Eq (Get-ModsTxtState -Lines @('NucleusX : 1') -Name 'Nucleus') 'absent' 'state: a longer name is not Nucleus'
+
+# ---------------------------------------------------------------- settings.lua
+$m = Get-Content (Join-Path $repo 'mod.json') -Raw | ConvertFrom-Json
+$text = ConvertTo-SettingsLua -Manifest $m
+Ok ($text -match "(?m)^return \{ onRevive = `"restore`" \}$") 'settings: default onRevive = "restore"' $text
+Ok ((ConvertTo-SettingsLua -Manifest $m -Override @{ onRevive = 'clear' }) -match 'return \{ onRevive = "clear" \}') 'settings: override clear'
+Ok ((ConvertTo-SettingsLua -Manifest $m -DebugLog) -match 'return \{ onRevive = "restore", debug = true \}') 'settings: -DebugLog adds debug = true'
+Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ onRevive = 'wipe' } } 'is not one of restore, clear' 'settings: an unknown value refused'
+Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ onRevive = 'Clear' } } 'is not one of' 'settings: enum values are case-sensitive'
+Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ onRevive = 1 } } 'is not one of' 'settings: a number refused'
+Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ colour = 1 } } 'not declared' 'settings: undeclared refused'
+# enum and int validation on synthetic manifests
+$mk = { param($json) $json | ConvertFrom-Json }
+Throws { ConvertTo-SettingsLua -Manifest (& $mk '{ "settings": { "x": { "type": "enum", "values": [], "default": "a" } } }') } 'non-empty' 'settings: an enum without values throws'
+Throws { ConvertTo-SettingsLua -Manifest (& $mk '{ "settings": { "x": { "type": "enum", "values": ["a\"b"], "default": "a\"b" } } }') } 'not a plain word' 'settings: an enum value that would break the Lua string throws'
+Throws { ConvertTo-SettingsLua -Manifest (& $mk '{ "settings": { "x": { "type": "float", "default": 1 } } }') } 'not supported' 'settings: unknown type throws'
+Ok ((ConvertTo-SettingsLua -Manifest (& $mk '{ "settings": { "n": { "type": "int", "default": 3, "min": 1, "max": 5 } } }')) -match 'return \{ n = 3 \}') 'settings: int still works'
+Throws { ConvertTo-SettingsLua -Manifest (& $mk '{ "settings": { "n": { "type": "int", "default": 9, "min": 1, "max": 5 } } }') } 'not an integer from 1 to 5' 'settings: int bounds'
+# The generated file is valid Lua that main.lua's loader accepts: checked by main_test.lua with the same text.
+Eq $m.settings.onRevive.label 'After a revive, your map markers' 'mod.json: the setting has its label'
+Eq $m.settings.onRevive.changeable 'anytime' 'mod.json: changeable anytime'
+Eq (@($m.settings.onRevive.values) -join ',') 'restore,clear' 'mod.json: values restore, clear'
+Eq $m.settings.onRevive.default 'restore' 'mod.json: default restore'
+Ok ($m.id -eq 'markers' -and $m.name -eq 'Markers' -and $m.version -eq '0.1.0' -and $m.scope -eq 'client') 'mod.json: id, name, version, scope'
+Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '^0.2.0') 'mod.json: dependsOn nucleus ^0.2.0'
+Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.1.2' -and $m.game.build -eq '26193463') 'mod.json: ue4ss and game build'
+# The runtime need in main.lua equals dependsOn's minimum.
+$mainLua = Get-Content (Join-Path $repo 'Scripts\main.lua') -Raw
+Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", "0\.2\.0", "Markers"') 'main.lua: need = dependsOn minimum (0.2.0)'
+
+# ---------------------------------------------------------------- mods.txt bytes
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("markers-deploy-test-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+New-Item -ItemType Directory $tmp | Out-Null
+try {
+    $p = Join-Path $tmp 'mods.txt'
+    foreach ($variant in @("A : 1`r`nKeybinds : 1`r`n", "A : 1`nKeybinds : 1", "A : 1`r`nKeybinds : 1")) {
+        [IO.File]::WriteAllText($p, $variant)
+        $f = Read-ModsTxt $p
+        Write-ModsTxt $p $f $f.Lines
+        Eq ([IO.File]::ReadAllText($p)) $variant "mods.txt io: round trip keeps bytes ($(($variant -replace "`r", '\r') -replace "`n", '\n'))"
+    }
+    [IO.File]::WriteAllBytes($p, [byte[]](0xEF, 0xBB, 0xBF) + [Text.Encoding]::UTF8.GetBytes("A : 1`r`n"))
+    $f = Read-ModsTxt $p; Write-ModsTxt $p $f $f.Lines
+    Eq ([BitConverter]::ToString([IO.File]::ReadAllBytes($p))) 'EF-BB-BF-41-20-3A-20-31-0D-0A' 'mods.txt io: BOM kept'
+
+    # ------------------------------------------------------------ deploy.ps1 end to end, fake instance
+    $inst = Join-Path $tmp 'game-instances\fake'
+    $win64 = Join-Path $inst 'NuclearNightmare\Binaries\Win64'
+    $mods = Join-Path $win64 'ue4ss\Mods'
+    New-Item -ItemType Directory -Force (Join-Path $mods 'Nucleus\Scripts'), (Join-Path $mods 'Keybinds') | Out-Null
+    Set-Content (Join-Path $win64 'NuclearNightmare-Win64-Shipping.exe') 'fake'
+    Set-Content (Join-Path $win64 'ue4ss\UE4SS.dll') 'fake'
+    $stockTxt = "CheatManagerEnablerMod : 1`r`nBPModLoaderMod : 1`r`nKeybinds : 1`r`n"
+    $coreTxt = "Nucleus : 1`r`n" + $stockTxt
+    $modsTxt = Join-Path $mods 'mods.txt'
+    $coreJson = Join-Path $mods 'Nucleus\mod.json'
+    function Set-Core([string] $version) { Set-Content $coreJson "{ `"id`": `"nucleus`", `"name`": `"Nucleus`", `"version`": `"$version`" }" }
+    # Each deploy runs in its own pwsh (it ends with exit), with Get-Process stubbed: a real game may be running.
+    function Deploy([string[]] $a) {
+        $cmd = "function Get-Process { }; & '$(Join-Path $repo 'deploy.ps1')' -Instance '$inst' $($a -join ' '); exit `$LASTEXITCODE"
+        $out = & pwsh -NoProfile -NonInteractive -Command $cmd 2>&1 | Out-String
+        return @{ Code = $LASTEXITCODE; Out = $out }
+    }
+    function Txt { [IO.File]::ReadAllText($modsTxt) }
+
+    # Core missing.
+    [IO.File]::WriteAllText($modsTxt, $stockTxt)
+    Remove-Item (Join-Path $mods 'Nucleus') -Recurse -Force
+    $d = Deploy @()
+    Ok ($d.Code -eq 1 -and $d.Out -match 'Markers not deployed: Nucleus is not installed') 'deploy: core missing -> refused' $d.Out
+    Ok (($d.Out.Trim() -split "`r?`n").Count -eq 1) 'deploy: refusal is one line' $d.Out
+    Ok (-not (Test-Path (Join-Path $mods 'Markers'))) 'deploy: refused -> nothing installed'
+    Eq (Txt) $stockTxt 'deploy: refused -> mods.txt untouched'
+
+    # Core too old (0.1.0) and too new (0.3.0).
+    New-Item -ItemType Directory -Force (Join-Path $mods 'Nucleus\Scripts') | Out-Null
+    [IO.File]::WriteAllText($modsTxt, $coreTxt)
+    Set-Core '0.1.0'
+    $d = Deploy @()
+    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.1\.0 is installed, but Markers needs \^0\.2\.0; update Nucleus\.') 'deploy: core 0.1.0 -> refused, naming both versions' $d.Out
+    Set-Core '0.3.0'
+    $d = Deploy @()
+    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.3\.0 is installed') 'deploy: core 0.3.0 -> refused' $d.Out
+    Set-Content $coreJson 'not json'
+    $d = Deploy @()
+    Ok ($d.Code -eq 1 -and $d.Out -match "is not Nucleus's manifest") 'deploy: unreadable core mod.json -> refused' $d.Out
+
+    # Core disabled.
+    Set-Core '0.2.0'
+    [IO.File]::WriteAllText($modsTxt, "Nucleus : 0`r`n" + $stockTxt)
+    $d = Deploy @()
+    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus is installed but disabled in mods\.txt') 'deploy: core disabled -> refused' $d.Out
+
+    # Good core: installed below Nucleus, above Keybinds; settings.lua generated; no core files bundled.
+    [IO.File]::WriteAllText($modsTxt, "Markers : 1`r`n" + $coreTxt) # a Markers line above Nucleus must move below it
+    Set-Core '0.2.1'
+    $d = Deploy @()
+    Ok ($d.Code -eq 0) 'deploy: core 0.2.1 -> installed' $d.Out
+    Eq (Txt) ("Nucleus : 1`r`nMarkers : 1`r`n" + $stockTxt) 'deploy: Markers below Nucleus, above Keybinds'
+    $files = @(Get-ChildItem (Join-Path $mods 'Markers') -Recurse -File | ForEach-Object { $_.FullName.Substring((Join-Path $mods 'Markers').Length + 1) } | Sort-Object)
+    Eq ($files -join ',') 'mod.json,Scripts\game.lua,Scripts\main.lua,Scripts\markers.lua,Scripts\revive.lua,Scripts\settings.lua' 'deploy: exactly the Markers files'
+    Ok ((Get-Content (Join-Path $mods 'Markers\Scripts\settings.lua') -Raw) -match 'return \{ onRevive = "restore" \}') 'deploy: settings.lua from mod.json defaults'
+    Ok (-not (Test-Path (Join-Path $mods 'MarkersDriver'))) 'deploy: no driver without -Test'
+
+    # -OnRevive clear.
+    $d = Deploy @('-OnRevive', 'clear')
+    Ok ((Get-Content (Join-Path $mods 'Markers\Scripts\settings.lua') -Raw) -match 'return \{ onRevive = "clear" \}') 'deploy: -OnRevive clear' $d.Out
+    Eq (Txt) ("Nucleus : 1`r`nMarkers : 1`r`n" + $stockTxt) 'deploy: redeploy keeps one Markers line'
+    $d = Deploy @('-OnRevive', 'wipe')
+    Ok ($d.Out -match 'does not belong to the set') 'deploy: -OnRevive wipe refused by the parameter' $d.Out
+
+    # -Test: driver between Nucleus and Markers, scenario written, debug on.
+    $d = Deploy @('-Test', '-Scenario', 'probe')
+    Ok ($d.Code -eq 0) 'deploy -Test: installed' $d.Out
+    Eq (Txt) ("Nucleus : 1`r`nMarkersDriver : 1`r`nMarkers : 1`r`n" + $stockTxt) 'deploy -Test: Nucleus, MarkersDriver, Markers, then the rest'
+    Eq ([IO.File]::ReadAllText((Join-Path $mods 'MarkersDriver\Scripts\scenario.txt'))) 'probe' 'deploy -Test: scenario.txt'
+    Ok ((Get-Content (Join-Path $mods 'Markers\Scripts\settings.lua') -Raw) -match 'return \{ onRevive = "restore", debug = true \}') 'deploy -Test: debug on'
+    Ok (Test-Path (Join-Path $mods 'MarkersDriver\Scripts\main.lua')) 'deploy -Test: the driver installed'
+    $d = Deploy @('-Test', '-Scenario', 'pair-victim', '-Staged')
+    Ok ($d.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $mods 'MarkersDriver\Scripts\scenario.txt')) -eq 'pair-victim') 'deploy -Test -Staged: pair-victim' $d.Out
+    $d = Deploy @()
+    Ok (-not (Test-Path (Join-Path $mods 'MarkersDriver')) -and (Txt) -eq ("Nucleus : 1`r`nMarkers : 1`r`n" + $stockTxt)) 'deploy without -Test removes the driver'
+
+    # -Force: installs despite a missing core, above Keybinds.
+    Set-Core '0.1.0'
+    $d = Deploy @('-Force', '-Test', '-Scenario', 'old-core')
+    Ok ($d.Code -eq 0 -and $d.Out -match 'forced: Nucleus 0\.1\.0 is installed') 'deploy -Force: warns and installs' $d.Out
+    Remove-Item (Join-Path $mods 'Nucleus') -Recurse -Force
+    [IO.File]::WriteAllText($modsTxt, $stockTxt)
+    $d = Deploy @('-Force')
+    Ok ($d.Code -eq 0) 'deploy -Force without core: installed' $d.Out
+    Eq (Txt) "CheatManagerEnablerMod : 1`r`nBPModLoaderMod : 1`r`nMarkers : 1`r`nKeybinds : 1`r`n" 'deploy -Force without core: above Keybinds'
+
+    # -Remove: back to exactly the stock files (story 4 AC 3), Nucleus's line untouched (story 1 AC 5).
+    $d = Deploy @('-Remove')
+    Ok ($d.Code -eq 0 -and -not (Test-Path (Join-Path $mods 'Markers'))) 'deploy -Remove: no Markers files' $d.Out
+    Eq (Txt) $stockTxt 'deploy -Remove: mods.txt byte-identical to stock'
+    New-Item -ItemType Directory -Force (Join-Path $mods 'Nucleus') | Out-Null
+    Set-Core '0.2.0'
+    [IO.File]::WriteAllText($modsTxt, $coreTxt)
+    Deploy @('-Test') | Out-Null
+    Deploy @('-Remove') | Out-Null
+    Eq (Txt) $coreTxt 'deploy -Remove after -Test: Nucleus line untouched, ours gone'
+    Ok (-not (Test-Path (Join-Path $mods 'MarkersDriver'))) 'deploy -Remove: driver gone'
+    $before = Txt
+    Deploy @('-Remove') | Out-Null
+    Eq (Txt) $before 'deploy -Remove twice: nothing changes'
+    Ok ((Get-ChildItem $mods -Directory | ForEach-Object Name | Sort-Object) -join ',' -eq 'Keybinds,Nucleus') 'deploy -Remove: Mods/ holds only what was there'
+} finally {
+    Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host ("deploy_test: {0} passed, {1} failed" -f $script:passed, $script:failed)
+exit $(if ($script:failed) { 1 } else { 0 })
