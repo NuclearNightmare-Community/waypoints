@@ -438,6 +438,14 @@ end
 -- The radio's reinforcement of one character (BP_Radio_C:ReinforceSpecficPlayer, a server RPC run on the host) after
 -- queueing it as a death would (game state UpdateRespawnQue).
 local function syntheticRevive(phase)
+    -- The death a real revive follows: death calls RemoveAllWidgets, and the player has no HUD for a while (core sees
+    -- `lost`). Without it, core could see the old HUD replaced by the new one in one poll (no `lost`), which Markers
+    -- rightly treats as a rebound (no proven death), not a revive.
+    step(phase .. ": death's RemoveAllWidgets", function()
+        local okR = pcall(function() WLL():RemoveAllWidgets(pc()) end)
+        say("DEATHSIM %s RemoveAllWidgets ok=%s", phase, tostring(okR))
+        return after(3), 8, "HUD lost"
+    end)
     step(phase .. ": reinforce", function()
         local c, p = pc(), myPawn()
         S.journalBefore = S.journalPath

@@ -69,7 +69,7 @@ The test driver `test/MarkersDriver` (installed only by `deploy.ps1 -Test`, neve
 | Scenario | What it proves |
 |---|---|
 | `probe` | Story 2's first checks: does `MapUI_C`'s `Construct` run on every map open (the Journal opened and closed from Lua four times)? The bug reproduced (`RemoveAllWidgets` stops painting); which repair paints again: toggling the widget space, re-running the actor's `BeginPlay`, or respawning (Markers' way); destroyed actors not counted alive |
-| `revive` | A revive through the game's own code, solo: the local character queued (`UpdateRespawnQue`) and `BP_Radio_C:ReinforceSpecficPlayer`, which spawns and possesses a new character as a reinforcement does. `restore`: one actor per marker, bound to the new pawn, painted, `bReplicates=false`, flags match; same Journal instance after the revive? Then the driver switches `settings.lua` to `clear` and revives again: nothing left |
+| `revive` | A revive through the game's own code, solo: the death's `RemoveAllWidgets`, then the local character queued (`UpdateRespawnQue`) and `BP_Radio_C:ReinforceSpecficPlayer`, which spawns and possesses a new character as a reinforcement does. `restore`: one actor per marker, bound to the new pawn, painted, `bReplicates=false`, flags match; same Journal instance after the revive? Then the driver switches `settings.lua` to `clear` and revives again: nothing left |
 | `death` | Death to spectator, solo: the snapshot is taken, nothing else happens, the waypoint actors survive |
 | `no-core`, `old-core` | One `[Markers]` line naming the cause; `deploy.ps1` refuses first |
 
