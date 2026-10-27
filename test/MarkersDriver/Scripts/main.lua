@@ -23,9 +23,9 @@
 --   death:   solo host: markers up, then the player dies (DeathEvent() on itself): spectator,
 --            the waypoints keep existing, Markers takes its snapshot and does nothing else.
 --   no-core, old-core: in a match: nothing from Markers (check.ps1 judges its one line).
---   pair-victim:     (B, a client in the VM) marks, is killed by the host, is revived by the host's radio; then the
---                    revive 1 checks on the client.
---   pair-host:       (A, the host, Markers not needed) once B is in the match: waits, kills B's character, waits for
+--   pair-victim:     (B, a client in the VM) marks, dies on the host's signal (kill.txt: DeathEvent() on its own
+--                    pawn), is revived by the host's radio; then the revive 1 checks on the client.
+--   pair-host:       (A, the host, Markers not needed) once B is in the match: waits, signals B's kill, waits for
 --                    B's death, calls the radio's Reinformant (the computer's "call reinforcement"), waits for B's new
 --                    character.
 --   pair-hostvictim: (A, the host, modded) marks, dies, calls the radio's Reinformant itself, then the revive checks.
@@ -45,6 +45,9 @@ do
     if f then SCENARIO = (f:read("*a") or ""):match("^%s*([%w%-]+)") or SCENARIO; f:close() end
 end
 say("SCENARIO %s", SCENARIO)
+-- pair-victim's kill signal (written into this folder by pair.ps1 through markers-scenarios.ps1); never a stale one.
+local KILL_SIGNAL = scriptDir .. "\\kill.txt"
+os.remove(KILL_SIGNAL)
 
 if SCENARIO == "old-core" then
     local f = io.open(modsDir .. "\\" .. CORE .. "\\mod.json", "r")
@@ -806,9 +809,30 @@ local function buildPairVictim()
     step("paint before", paintEach("before", "paintBefore"))
     drawnAll("before", "paintBefore")
     step("victim ready", function() say("VICTIM ready marked=%s", table.concat(S.marked, ",")) end)
+    -- The kill: the host's DeathEvent() on this (remote) character does nothing (mk-client 2026-10-27: still
+    -- possessed after two calls; the event's first branch only acts on the locally controlled pawn). So the host
+    -- only signals: it logs "KILL victim", pair.ps1 writes kill.txt next to this file, and this machine calls
+    -- DeathEvent() on its own pawn (the solo-proven path); still alive 5 s later: CallDamageEvent(100) (the
+    -- character's server RPC, the client reporting damage).
     step("death", function()
         local was = S.pawnPath
-        return function() local p = myPawn() return not (p and classOf(p) == FP and pathOf(p) == was) end, 600, "killed by the host"
+        return function()
+            local p = myPawn()
+            if not (p and classOf(p) == FP and pathOf(p) == was) then return true end
+            if not S.selfKill then
+                local f = io.open(KILL_SIGNAL, "r")
+                if not f then return false end
+                f:close()
+                S.selfKill = os.clock()
+                local ok, err = pcall(function() p:DeathEvent() end)
+                say("SELFKILL the host's signal: DeathEvent() on my pawn %s ok=%s %s", pathOf(p), tostring(ok), ok and "" or tostring(err))
+            elseif not S.selfKill2 and os.clock() - S.selfKill > 5 then
+                S.selfKill2 = true
+                local ok, err = pcall(function() p:CallDamageEvent(100) end)
+                say("SELFKILL still possessed after 5 s: CallDamageEvent(100) ok=%s %s", tostring(ok), ok and "" or tostring(err))
+            end
+            return false
+        end, 600, "killed (the host's signal, then this machine's own DeathEvent)"
     end)
     step("dead", function() local p = myPawn() say("DEAD pawn=%s class=%s", p and pathOf(p) or "none", p and classOf(p) or "none") end)
     waitPawnChange("revive", 600)
@@ -820,7 +844,14 @@ local function buildPairHost()
         return function() return #remotePCs() > 0 and pawnOf(remotePCs()[1]) ~= nil and classOf(pawnOf(remotePCs()[1])) == FP end, 600, "the other player's character"
     end)
     wait("victim marks", 90) -- the victim opens its map and marks (it logs VICTIM ready on its own machine)
-    kill("victim", function() return pawnOf(remotePCs()[1]) end)
+    -- No DeathEvent() here: on the remote character it does nothing (see buildPairVictim). The line is the signal:
+    -- pair.ps1 waits for it and writes the victim's kill.txt; the victim kills itself.
+    step("victim: kill", function()
+        local target = pawnOf(remotePCs()[1])
+        if not target then check(false, "KILL victim target found") return end
+        S.killed = pathOf(target)
+        say("KILL victim %s signal (the victim calls DeathEvent on its own pawn)", S.killed)
+    end)
     step("victim dead", function()
         return function()
             local p = pawnOf(remotePCs()[1])
@@ -845,7 +876,8 @@ local function buildPairHost()
         end, 180, "the victim's new character"
     end)
     step("revived", function()
-        check(true, "REVIVED the victim has a new first-person character %s", pathOf(pawnOf(remotePCs()[1])))
+        local p = pawnOf(remotePCs()[1])
+        check(p ~= nil and classOf(p) == FP and pathOf(p) ~= S.killed, "REVIVED the victim has a new first-person character %s", p and pathOf(p) or "none")
         return after(30), 35, "let the victim check"
     end)
 end

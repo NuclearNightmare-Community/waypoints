@@ -13,9 +13,9 @@
   Prereq also refuses a host copy with Markers or core of its own (the host must stay unmodded but for the driver).
   Roles (test/MarkersDriver scenario.txt):
     mk-client  B (VM, client) = Nucleus + Markers + MarkersDriver "pair-victim": marks two flags and the satellite,
-               is killed by the host, revived through the host's radio; then the revive checks on B.
+               dies on the host's signal (kill.txt; DeathEvent on its own pawn), revived through the host's radio; then the revive checks on B.
                A (host) = MarkersDriver "pair-host" only (no Markers): a modded client of an unmodded host (CAP-3),
-               and the host side of the kill and the reinforcement: BP_Radio_C:Reinformant(), the computer's
+               and the kill signal and the reinforcement: BP_Radio_C:Reinformant(), the computer's
                "call reinforcement" (it picks SpawnReinforcementMethod2 when the dead player is queued, else the
                spectator path), called from Lua on the host, where the radio has authority.
     mk-host    A (host) = Nucleus + Markers + MarkersDriver "pair-hostvictim": marks, dies, calls Reinformant itself.
@@ -63,7 +63,7 @@ function Get-MarkersCheck([string] $Log, [string] $Scenario, [ValidateSet('host'
 
 $script:MarkersPairScenarios = @{
     'mk-client' = @{
-        Summary = 'Markers: B (client, modded) marks 2 flags + satellite, A (host, MarkersDriver only) kills B (DeathEvent) and reinforces it via the radio; B''s markers must come back'
+        Summary = 'Markers: B (client, modded) marks 2 flags + satellite, A (host, MarkersDriver only) signals B''s kill (B calls DeathEvent on its own pawn) and reinforces it via the radio; B''s markers must come back'
         Prereq = {
             # The host stays unmodded but for the driver (CAP-3): no Markers or core of its own in the host copy.
             $own = @('Markers', 'Nucleus' | Where-Object { Test-Path (Join-Path $modsDir $_) }) + @('Nucleus.pak' | Where-Object { Test-Path (Join-Path $inst "NuclearNightmare\Content\Paks\LogicMods\$_") })
@@ -86,6 +86,12 @@ $script:MarkersPairScenarios = @{
         AfterJoin = {
             Save-ShotAt -Seconds 120 -Name 'marked' -Expect 'B in the match with 2 location waypoints and the satellite waypoint on screen'
             Wait-HostLine '\[MarkersDriver\] KILL victim ' 600 | Out-Null
+            # The host's DeathEvent() on B's remote character did nothing (2026-10-27), so B kills itself: the
+            # driver in the VM polls for Scripts\kill.txt (a fixed name, fixed content; nothing from the game).
+            $sig = Join-Path (Get-NNBCopyPaths).ModsDir 'MarkersDriver\Scripts\kill.txt'
+            Invoke-NNB -ArgumentList $sig -ScriptBlock { param($f) Set-Content -LiteralPath $f 'kill' }
+            Write-Host "Kill signal written to the VM: $sig"
+            $script:LastAction = @{ Name = 'kill signal'; Time = Get-Date }
             Save-ShotAt -Seconds 15 -Name 'dead' -Expect 'B dead (spectator view or death screen); no waypoints'
             Wait-HostLine '\[MarkersDriver\] OK REVIVED ' 300 | Out-Null
             Save-ShotAt -Seconds 10 -Name 'revived' -Expect 'B revived: the same 3 waypoints on screen with distances, white (bound to the live pawn)'

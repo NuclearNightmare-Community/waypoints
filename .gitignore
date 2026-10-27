@@ -9,3 +9,4 @@ build/
 test/MarkersDriver/Scripts/scenario.txt
 test/MarkersDriver/Scripts/request.txt
 test/MarkersDriver/Scripts/done.txt
+test/MarkersDriver/Scripts/kill.txt
