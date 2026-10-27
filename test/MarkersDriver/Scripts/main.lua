@@ -139,10 +139,11 @@ local function waypoints()
                 local e = out[name] or { n = 0 }
                 e.n = e.n + 1
                 e.path = pathOf(a)
+                pcall(function() local v = a:K2_GetActorLocation() e.loc = { X = v.X, Y = v.Y, Z = v.Z } end)
                 local okC, c = pcall(function() return a.Character end)
                 e.character = okC and valid(c) and pathOf(c) or nil
                 local okR, r = pcall(function() return a.bReplicates end)
-                e.replicates = okR and r or nil
+                if okR then e.replicates = r end
                 out[name] = e
                 total = total + 1
             end
@@ -254,6 +255,49 @@ local function paintWindow(phase, sec, store)
     end
 end
 
+-- A screen-space waypoint is painted only while its location is in view (the first probe run: a marker behind the
+-- camera had no paints). So each marker is checked on its own: the camera is turned to it (the local controller's
+-- SetControlRotation), then its paints are counted. Logs "PAINT <phase> name=n ..." and stores { name = n }.
+local function aimAt(loc)
+    local c = pc()
+    local cam = c.PlayerCameraManager:GetCameraLocation()
+    local dx, dy, dz = loc.X - cam.X, loc.Y - cam.Y, loc.Z - cam.Z
+    local yaw = math.deg(math.atan(dy, dx))
+    local pitch = math.deg(math.atan(dz, math.sqrt(dx * dx + dy * dy)))
+    c:SetControlRotation({ Pitch = pitch, Yaw = yaw, Roll = 0 })
+end
+local function paintEach(phase, store, settle, window)
+    settle, window = settle or 0.6, window or 1.2
+    return function()
+        local names, i, stage, t, res = {}, 0, "next", 0, {}
+        for _, n in ipairs(S.marked) do names[#names + 1] = n end
+        return function()
+            if stage == "next" then
+                i = i + 1
+                if i > #names then
+                    local o = {}
+                    for _, n in ipairs(names) do o[#o + 1] = n .. "=" .. (res[n] or 0) end
+                    say("PAINT %s %s", phase, #o > 0 and table.concat(o, " ") or "none")
+                    if store then S[store] = res end
+                    return true
+                end
+                local e = (waypoints())[names[i]]
+                local okA, err = false, "no waypoint actor"
+                if e and e.loc then okA, err = pcall(aimAt, e.loc) end
+                if not okA then say("AIM %s '%s' skipped (%s)", phase, names[i], tostring(err)) res[names[i]] = 0 return false end
+                stage, t = "settle", os.clock()
+            elseif stage == "settle" and os.clock() - t >= settle then
+                S.paint, S.painting, stage, t = {}, true, "count", os.clock()
+            elseif stage == "count" and os.clock() - t >= window then
+                S.painting = false
+                res[names[i]] = S.paint[names[i]] or 0
+                stage = "next"
+            end
+            return false
+        end, #names * (settle + window + 1) + 10, phase .. " paint per marker"
+    end
+end
+
 -- ---------------------------------------------------------------- steps and key requests
 local seq = 0
 local function request(cmd)
@@ -327,6 +371,8 @@ local function mark(phase, n)
         S.marked = {}
         for i = 1, math.min(n, #list) do
             local f = list[i]
+            -- The game's MapUI_C gives each flag its Character; a map opened from Lua leaves it empty (probe run 1).
+            pcall(function() f.Character = myPawn() end)
             local ok, err = pcall(function() f[LOC_CLICK](f) end)
             local name = text(f.Name)
             if ok then S.marked[#S.marked + 1] = name end
@@ -404,7 +450,7 @@ local function restoredChecks(phase)
         check(bound, "BOUND %s every location waypoint's Character is the new pawn", phase)
         check(rep, "LOCAL %s every waypoint actor has bReplicates=false", phase)
     end)
-    step(phase .. ": paint", paintWindow(phase, 3, "paintAfter"))
+    step(phase .. ": paint", paintEach(phase, "paintAfter"))
     drawnAll(phase, "paintAfter")
     step(phase .. ": open map", function() openMap(phase) return after(2), 5, "map open" end)
     step(phase .. ": flags", function()
@@ -420,11 +466,11 @@ local function clearedChecks(phase)
     step(phase .. ": wait clear", function()
         return function() local _, total = waypoints() return total == 0 end, 20, phase .. " no waypoint left"
     end)
-    step(phase .. ": paint", paintWindow(phase, 3, "paintCleared"))
+    step(phase .. ": paint", paintEach(phase, "paintCleared"))
     step(phase .. ": cleared", function()
         local _, total = waypoints()
         check(total == 0, "NONE %s no waypoint actor left (%d)", phase, total)
-        local n = 0 for _ in pairs(S.paintCleared or {}) do n = n + 1 end
+        local n = 0 for _, c in pairs(S.paintCleared or {}) do if c > 0 then n = n + 1 end end
         check(n == 0, "NOPAINT %s no waypoint painted", phase)
     end)
     step(phase .. ": open map", function() openMap(phase) return after(2), 5, "map open" end)
@@ -533,7 +579,7 @@ local function buildProbe()
     end)
     -- (2) the bug: painted, then not after RemoveAllWidgets
     mark("mark", 3)
-    step("paint before", paintWindow("before", 3, "paintBefore"))
+    step("paint before", paintEach("before", "paintBefore"))
     drawnAll("before", "paintBefore")
     step("remove all widgets", function()
         local c = pc()
@@ -550,9 +596,9 @@ local function buildProbe()
         say("READD hud ok=%s", tostring(ok))
         return after(2), 5, "hud back"
     end)
-    step("paint removed", paintWindow("removed", 3, "paintRemoved"))
+    step("paint removed", paintEach("removed", "paintRemoved"))
     step("repro", function()
-        local n = 0 for _ in pairs(S.paintRemoved or {}) do n = n + 1 end
+        local n = 0 for _, c in pairs(S.paintRemoved or {}) do if c > 0 then n = n + 1 end end
         check(n == 0, "REPRO after RemoveAllWidgets no waypoint is painted (%d painted): the bug, and the paint hook sees it", n)
     end)
     -- (3) repairs, one per marker
@@ -588,7 +634,7 @@ local function buildProbe()
         try("Satellite", "respawn", respawn)
         return after(1), 5, "repairs"
     end)
-    step("paint repaired", paintWindow("repaired", 3, "paintRepaired"))
+    step("paint repaired", paintEach("repaired", "paintRepaired"))
     step("answer repair", function()
         local t = {}
         for name, method in pairs(S.method or {}) do
@@ -610,9 +656,26 @@ local function buildProbe()
         pcall(function() f[LOC_CLICK](f) end); pcall(function() f[LOC_CLICK](f) end) -- on, then off: its actor destroyed
         local name = text(f.Name)
         local seen, live = 0, 0
+        local ksl = StaticFindObject("/Script/Engine.Default__KismetSystemLibrary")
+        local kIsValid = StaticFindObject("/Script/Engine.KismetSystemLibrary:IsValid")
         for _, a in ipairs(FindAllOf("LevelWaypointActor_C") or {}) do
-            if valid(a) and text(a.Name) == name then seen = seen + 1; if alive(a) then live = live + 1 end end
+            if valid(a) and text(a.Name) == name then
+                seen = seen + 1
+                if alive(a) then live = live + 1 end
+                -- Diagnostics (probe run 1 found the destroyed actor counted alive): every candidate signal.
+                local okD, dying = pcall(function() return a:IsActorBeingDestroyed() end)
+                local okK, kv = pcall(function() return kIsValid(ksl, a) end)
+                local okW, w = pcall(function() return a:GetWorld():GetFullName() end)
+                local okR, root = pcall(function() return valid(a.RootComponent) end)
+                local okG, garbage = pcall(function() return a:HasAnyInternalFlags(EInternalObjectFlags.Garbage or EInternalObjectFlags.PendingKill) end)
+                say("LIVENESS candidate %s IsActorBeingDestroyed=%s/%s KSL.IsValid=%s/%s world=%s root=%s/%s garbageFlag=%s/%s", pathOf(a):match("[^.]+$"),
+                    tostring(okD), tostring(dying), tostring(okK), tostring(kv), okW and "yes" or tostring(w), tostring(okR), tostring(root), tostring(okG), tostring(garbage))
+            end
         end
+        local out = {}
+        local okA, errA = pcall(function() GS():GetAllActorsOfClass(pc(), (FindAllOf("LevelWaypointActor_C") or {})[1]:GetClass(), out) end)
+        local n = 0 for _ in pairs(out) do n = n + 1 end
+        say("LIVENESS flag Selected=%s after on+off; GetAllActorsOfClass ok=%s %s entries=%d", tostring(f.Selected), tostring(okA), okA and "" or tostring(errA), n)
         closeMap()
         say("LIVENESS '%s' FindAllOf=%d alive=%d", tostring(name), seen, live)
         check(live == 0, "LIVENESS a waypoint destroyed by its flag is not counted alive (FindAllOf=%d, alive=%d)", seen, live)
@@ -622,7 +685,7 @@ end
 local function buildRevive()
     enterMatch("match1")
     mark("mark", 2)
-    step("paint before", paintWindow("before", 3, "paintBefore"))
+    step("paint before", paintEach("before", "paintBefore"))
     drawnAll("before", "paintBefore")
     step("journal before", function() openMap("before") return after(1), 5, "open" end)
     step("journal before 2", function() flagState("before") closeMap() end)
@@ -671,7 +734,7 @@ end
 local function buildPairVictim()
     waitMatch("match", 900)
     mark("mark", 2)
-    step("paint before", paintWindow("before", 3, "paintBefore"))
+    step("paint before", paintEach("before", "paintBefore"))
     drawnAll("before", "paintBefore")
     step("victim ready", function() say("VICTIM ready marked=%s", table.concat(S.marked, ",")) end)
     step("death", function()
@@ -721,7 +784,7 @@ local function buildPairHostVictim()
     waitMatch("match", 900)
     step("other present", function() return function() return #remotePCs() > 0 end, 600, "the other player" end)
     mark("mark", 2)
-    step("paint before", paintWindow("before", 3, "paintBefore"))
+    step("paint before", paintEach("before", "paintBefore"))
     drawnAll("before", "paintBefore")
     kill("death", myPawn)
     wait("after death", 15)
