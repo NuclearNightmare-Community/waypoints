@@ -83,6 +83,14 @@ $copy = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'
 
 With `-Target vm`, core comes from `mods/Nucleus/build/package` and Markers plus the driver from this repo's `deploy.ps1 -Staged`; the VM copy is put back afterwards. Every Markers scenario may run in the VM (none judges timing). Take the workspace's `dumps/vm.lock` around VM runs while other agents share the VM.
 
+**Results in the VM (V8.1.2, 2026-10-26, logs `dumps/v8.1.2-build26193463/markers/*.vm.batch2.log`): probe, death and revive all pass.**
+- `MapUI_C`'s `Construct` runs on every map open, and every open gets a **new Journal instance** with all its flags rebuilt (4 opens, 4 Journals). So after a revive the Journal is a new instance too (`journal-same-after-revive=no`); the flags it builds take `Selected` from the waypoint actors, which is why "truth is the actor" is enough.
+- `RemoveAllWidgets` stops every waypoint from painting (the bug). A respawned actor paints again (Markers' way, `bReplicates=false`); re-running the actor's `BeginPlay` also works; toggling the widget component's space does not.
+- Liveness: a waypoint its flag just destroyed is still returned by `FindAllOf`, with `IsActorBeingDestroyed() == false` and UE4SS's `IsValid() == true`; UE's own `KismetSystemLibrary:IsValid` (called as the UFunction) is false, and `game.lua` uses it.
+- Death: `ExplosionDamage` from Lua didn't kill; `DeathEvent()` did. The player became a `Spectator_C`, the waypoint actors survived, Markers took its snapshot and did nothing else.
+- Revive (through the radio's own code): `LOST` → `REVIVE` → `RESTORED n=3` about 1.3 s later, every waypoint bound to the new pawn and painted, the map showing exactly those flags; then with `clear`: `CLEARED n=3`, nothing painted, no flag selected.
+- The snapshot at `lost` costs about 2 ms inside core's HUD tick (a soft `hud slow tick ... HUD event: lost` warning).
+
 ### Two-player scenarios (the real revive; need tools/vm/pair.ps1)
 
 A solo player can't be revived (the last death ends the match), so the real thing needs two players: `test/pair/markers-scenarios.ps1`, in `pair.ps1`'s scenario shape, friends-only lobbies only.
@@ -104,7 +112,8 @@ The victim must die neither drowned nor infected (or it becomes a monster: `pair
 ## Known risks
 
 - The revive's order of events on a client (the new pawn's HUD vs the radio multicast's `RemoveAllWidgets`) is only known from the decompile; the settle window ("again") covers the late case.
-- `UE4SS` marshalling of `FTransform` for `BeginDeferredActorSpawnFromClass` is unproven here; a fallback (`SpawnActor` + the actor's own `BeginPlay` graph with `Name` set) is logged as such.
+- `FTransform` marshalling for `BeginDeferredActorSpawnFromClass` works (VM runs); the fallback (`SpawnActor` + the actor's own `BeginPlay` graph) stays, logged as such.
+- The two-player revive (a real death, the computer's reinforcement, the client side) is not yet run; the solo revive goes through the same radio code (`ReinforceSpecficPlayer` → `RPCReinforcementMethod2`) on the host only.
 - Other `RemoveAllWidgets` callers (the player controller, the Wendigo head, the endgame bomb) also hide waypoints without a revive; 0.1.0 acts only on revives (same pawn back after a loss is logged at DEBUG and left alone).
 - `BP_Radio_C:SpawnReinformantRPC` would revive the same character (no new pawn); nothing calls it in V8.1.2.
 
