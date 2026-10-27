@@ -258,6 +258,10 @@ end
 -- A screen-space waypoint is painted only while its location is in view (the first probe run: a marker behind the
 -- camera had no paints). So each marker is checked on its own: the camera is turned to it (the local controller's
 -- SetControlRotation), then its paints are counted. Logs "PAINT <phase> name=n ..." and stores { name = n }.
+-- The aim is re-applied on every tick and what the camera really shows is checked (the camera manager's rotation, the
+-- angle to the marker): a window counts only if the marker stayed in view the whole time. A window where it didn't is
+-- retried (AIMTRIES); a marker never held in view gets 0 (DRAWN fails, and the AIM lines say why).
+local INVIEW_DEG, AIMTRIES = 10, 4
 local function aimAt(loc)
     local c = pc()
     local cam = c.PlayerCameraManager:GetCameraLocation()
@@ -266,14 +270,39 @@ local function aimAt(loc)
     local pitch = math.deg(math.atan(dz, math.sqrt(dx * dx + dy * dy)))
     c:SetControlRotation({ Pitch = pitch, Yaw = yaw, Roll = 0 })
 end
+-- Degrees between the rendered camera's forward and the direction to loc, and the distance in m.
+local function offAim(loc)
+    local cm = pc().PlayerCameraManager
+    local cam, rot = cm:GetCameraLocation(), cm:GetCameraRotation()
+    local dx, dy, dz = loc.X - cam.X, loc.Y - cam.Y, loc.Z - cam.Z
+    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if len < 1 then return 0, 0 end
+    local p, y = math.rad(rot.Pitch), math.rad(rot.Yaw)
+    local dot = (math.cos(p) * math.cos(y) * dx + math.cos(p) * math.sin(y) * dy + math.sin(p) * dz) / len
+    return math.deg(math.acos(math.max(-1, math.min(1, dot)))), len / 100
+end
+local function viewInfo()
+    local c = pc()
+    local okV, v = pcall(function() return classOf(c:GetViewTarget()) end)
+    local okR, r = pcall(function() local x = c.PlayerCameraManager:GetCameraRotation() return string.format("%.0f/%.0f", x.Pitch, x.Yaw) end)
+    return (okV and v or "?") .. " cam=" .. (okR and r or "?")
+end
 local function paintEach(phase, store, settle, window)
     settle, window = settle or 0.6, window or 1.2
     return function()
-        local names, i, stage, t, res = {}, 0, "next", 0, {}
+        local names, i, stage, t, res, try, maxOff, dist = {}, 0, "next", 0, {}, 0, 0, 0
         for _, n in ipairs(S.marked) do names[#names + 1] = n end
+        local function aim()
+            local e = (waypoints())[names[i]]
+            if not (e and e.loc) then return false, "no waypoint actor" end
+            local ok, err = pcall(aimAt, e.loc)
+            if not ok then return false, err end
+            local okO, off, d = pcall(offAim, e.loc)
+            return true, okO and off or 180, okO and d or 0
+        end
         return function()
             if stage == "next" then
-                i = i + 1
+                i, try = i + 1, 0
                 if i > #names then
                     local o = {}
                     for _, n in ipairs(names) do o[#o + 1] = n .. "=" .. (res[n] or 0) end
@@ -281,20 +310,35 @@ local function paintEach(phase, store, settle, window)
                     if store then S[store] = res end
                     return true
                 end
-                local e = (waypoints())[names[i]]
-                local okA, err = false, "no waypoint actor"
-                if e and e.loc then okA, err = pcall(aimAt, e.loc) end
-                if not okA then say("AIM %s '%s' skipped (%s)", phase, names[i], tostring(err)) res[names[i]] = 0 return false end
+                stage = "aim"
+            end
+            if stage == "aim" then
+                try = try + 1
+                local ok, err = aim()
+                if not ok then say("AIM %s '%s' skipped (%s)", phase, names[i], tostring(err)) res[names[i]] = 0 stage = "next" return false end
                 stage, t = "settle", os.clock()
-            elseif stage == "settle" and os.clock() - t >= settle then
-                S.paint, S.painting, stage, t = {}, true, "count", os.clock()
-            elseif stage == "count" and os.clock() - t >= window then
-                S.painting = false
-                res[names[i]] = S.paint[names[i]] or 0
-                stage = "next"
+            elseif stage == "settle" then
+                local ok = aim()
+                if not ok then stage = "aim" return false end
+                if os.clock() - t >= settle then S.paint, S.painting, stage, t, maxOff = {}, true, "count", os.clock(), 0 end
+            elseif stage == "count" then
+                local ok, off, d = aim()
+                maxOff, dist = math.max(maxOff, ok and off or 180), ok and d or dist
+                if os.clock() - t >= window then
+                    S.painting = false
+                    local n, held = S.paint[names[i]] or 0, maxOff < INVIEW_DEG
+                    say("AIM %s '%s' try=%d off<=%.1f deg dist=%.0f m paints=%d view=%s%s", phase, names[i], try, maxOff, dist, n, viewInfo(),
+                        held and "" or " (not held in view)")
+                    if held or try >= AIMTRIES then
+                        res[names[i]] = held and n or 0
+                        stage = "next"
+                    else
+                        stage = "aim"
+                    end
+                end
             end
             return false
-        end, #names * (settle + window + 1) + 10, phase .. " paint per marker"
+        end, #names * AIMTRIES * (settle + window + 1) + 10, phase .. " paint per marker"
     end
 end
 
@@ -325,17 +369,38 @@ local function waitWorld(phase, mapPart, timeout)
         end, timeout, phase .. " world " .. mapPart
     end)
 end
+-- The landing showcase: with the pawn and the HUD already up, the game state's UpdateHeliVis puts the view on the
+-- landing helicopter's camera (Helicopter_BP_Showcase_Landing_C) for 9 s, then blends back to the pawn over 3 s
+-- (BP_FirstPersonGameState_C decompile, labels 27274 and 10554). Until it ends, the driver's aim (the control rotation)
+-- doesn't move what is rendered: VM runs 2026-10-27 measured the first paint check on that camera. So the match is
+-- ready once the view has been on the pawn for 3 s after the showcase, or, if no showcase shows up, after SHOWCASE_WAIT.
+local SHOWCASE_WAIT = 30
+local function viewTarget(c)
+    local ok, v = pcall(function() return c:GetViewTarget() end)
+    return ok and valid(v) and v or nil
+end
 local function waitHud(phase, timeout)
     step(phase .. ": hud", function()
-        local since
+        local since, up, other, t0 = nil, nil, nil, os.clock()
         return function()
-            local h, p = liveHud(), myPawn()
-            if h and p and classOf(p) == FP then
+            local c = pc()
+            local h, p = liveHud(), pawnOf(c)
+            if not (h and p and classOf(p) == FP) then since = nil return false end
+            up = up or os.clock()
+            local v = viewTarget(c)
+            if v and pathOf(v) == pathOf(p) then
                 since = since or os.clock()
-                if os.clock() - since >= 3 then S.pawnPath = pathOf(p) say("HUD %s pawn=%s", phase, S.pawnPath) return true end
+            else
+                since = nil
+                if not other then other = v and classOf(v) or "none" say("VIEW %s the camera is %s's (%.1f s after the HUD)", phase, other, os.clock() - up) end
+            end
+            if since and os.clock() - since >= 3 and (other or os.clock() - up >= SHOWCASE_WAIT) then
+                S.pawnPath = pathOf(p)
+                say("HUD %s pawn=%s (the pawn's camera since %.1f s; before it: %s)", phase, S.pawnPath, since - t0, other or "no other camera")
+                return true
             end
             return false
-        end, timeout, phase .. " live HUD with a first-person pawn"
+        end, timeout, phase .. " live HUD with a first-person pawn whose camera is the view"
     end)
 end
 local function travel(phase, map, options)
