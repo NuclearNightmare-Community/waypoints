@@ -82,6 +82,12 @@ end
 -- Death (HUD lost), then the reinforcement: a new pawn with a new HUD.
 local function dieAndRevive(core, i)
     emit(core, nil, "lost")
+    if ExecuteInGameThreadWithDelay then
+        eq(count("LOST"), 0, "no snapshot inside core's HUD tick at the death")
+        eq(#W.delayed, 1, "the snapshot is deferred")
+        eq(W.delayed[1].ms, 50, "snapshot deferred by 50 ms")
+        W.runDelayed()
+    end
     W.p2 = W.pawn(i or 2)
     W.hud2 = W.hud(W.p2)
     core.advance(60)
@@ -173,6 +179,36 @@ do
     eq(count("RESTORED n=1 "), 1, "second revive restores")
 end
 
+do -- The revive comes before the deferred snapshot ran: the restore still gets it (filled in place, queued first).
+    boot()
+    local core = newCore()
+    ready(core)
+    match(core)
+    emit(core, nil, "lost")
+    W.p2 = W.pawn(2); W.hud2 = W.hud(W.p2); core.advance(1); emit(core, W.hud2, "attached")
+    eq(#W.delayed, 2, "snapshot and restore both queued")
+    eq(W.delayed[1].ms, 50, "the snapshot runs first")
+    W.runDelayed()
+    eq(count("^%[Markers%] LOST pawn=.*_1 snapshot n=3 "), 1, "LOST with the snapshot")
+    eq(count("^%[Markers%] RESTORED n=3 "), 1, "RESTORED n=3")
+end
+
+do -- The waypoint actors can't be read at the death: an empty snapshot, the revive still restores from the live actors.
+    boot()
+    local core = newCore()
+    ready(core)
+    match(core)
+    local saved = FindAllOf
+    FindAllOf = function() error("boom") end
+    emit(core, nil, "lost")
+    W.runDelayed()
+    FindAllOf = saved
+    eq(count("LOST pawn=.*snapshot n=0 "), 1, "LOST with an empty snapshot")
+    W.p2 = W.pawn(2); W.hud2 = W.hud(W.p2); core.advance(60); emit(core, W.hud2, "attached")
+    W.runDelayed()
+    eq(count("RESTORED n=3 %(from actors 3, from the snapshot 0"), 1, "restored from the live actors")
+end
+
 do -- A new pawn without a HUD loss (no proven death): REBOUND, restored even with onRevive = clear.
     boot{ settings = 'return { onRevive = "clear" }' }
     local core = newCore()
@@ -192,6 +228,7 @@ do -- Death to spectator, no revive: nothing done; a map change forgets everythi
     ready(core)
     match(core)
     emit(core, nil, "lost")
+    W.runDelayed()
     local spec = W.obj("Spectator_C", "/Game/Maps/SmallLoweIsland/SmallMap.SmallMap:PersistentLevel.Spectator_C_1")
     emit(core, W.hud(nil, spec), "attached")
     eq(count("PAWN .*Spectator_C_1 %(Spectator_C%) is not a first%-person character: not a revive"), 1, "spectator: not a revive")

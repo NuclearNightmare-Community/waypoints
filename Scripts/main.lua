@@ -7,6 +7,7 @@
 -- deferred action re-finds the new pawn through a weak handle. No per-tick work: it acts on HUD events only.
 local CORE, NEED, ME = "Nucleus", "0.2.0", "Markers"
 local DELAY_MS = 500 -- after the revive's HUD event, so the game has finished possessing the new pawn
+local SNAPSHOT_MS = 50 -- the snapshot at the death runs this much later, outside core's HUD tick (it costs about 2 ms)
 
 local source = debug.getinfo(1, "S").source:gsub("^@", "")
 local scriptDir = source:match("^(.*)[/\\]") or "."
@@ -105,13 +106,24 @@ local function start(core)
     local function onHud(h, info)
         local event = type(info) == "table" and info.event or nil
         if event == "lost" then
+            -- The snapshot is read SNAPSHOT_MS later, outside core's HUD tick. revive.lua keeps this same (empty) list
+            -- and the deferred read fills it in place, so a revive that comes first still gets it by the time its own
+            -- action runs (DELAY_MS later, queued after this). The waypoint actors survive the death (spectator).
             local snap
-            if R:wantsSnapshot() then snap = markers.snapshot(game, R.world, log) or {} end
+            if R:wantsSnapshot() then snap = {} end
             local d = R:lost(snap)
-            if d.kind == "lost" and d.first then
-                local l, s = markers.counts(snap)
-                log.info("LOST pawn=%s snapshot n=%d (locations %d, satellite %d)", d.pawn, l + s, l, s)
+            if not (d.kind == "lost" and d.first and snap) then return end
+            local world, pawn = R.world, d.pawn
+            local function take()
+                local okT, err = pcall(function()
+                    for _, e in ipairs(markers.snapshot(game, world, log) or {}) do snap[#snap + 1] = e end
+                    local l, s = markers.counts(snap)
+                    log.info("LOST pawn=%s snapshot n=%d (locations %d, satellite %d)", pawn, l + s, l, s)
+                end)
+                if not okT then log.error("snapshot failed: %s", tostring(err)) end
             end
+            local okL = type(ExecuteInGameThreadWithDelay) == "function" and pcall(ExecuteInGameThreadWithDelay, SNAPSHOT_MS, take)
+            if not okL then take() end
             return
         end
         if event ~= "attached" then return end
