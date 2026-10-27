@@ -679,6 +679,8 @@ local function buildProbe()
         closeMap()
         say("LIVENESS '%s' FindAllOf=%d alive=%d", tostring(name), seen, live)
         check(live == 0, "LIVENESS a waypoint destroyed by its flag is not counted alive (FindAllOf=%d, alive=%d)", seen, live)
+        local _, total = waypoints()
+        check(total == #S.marked, "LIVEOK the %d live markers are all still counted alive (%d)", #S.marked, total)
     end)
 end
 

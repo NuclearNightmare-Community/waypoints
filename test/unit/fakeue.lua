@@ -1,7 +1,7 @@
 -- A fake UE4SS world for the unit tests: just enough UObjects (actors, widgets, pawns, HUDs, classes, worlds) and
 -- globals (FindAllOf, StaticFindObject, FText, ExecuteInGameThreadWithDelay, RegisterLoadMapPostHook) for game.lua,
 -- markers.lua and main.lua to run outside the game. Destroyed actors stay findable (and IsValid) until gc(), as they do
--- in the game until the next garbage collection; IsActorBeingDestroyed tells them apart.
+-- in the game until the next garbage collection; UE's IsValid (KismetSystemLibrary:IsValid, a UFunction) tells them apart.
 local F = {}
 
 local Obj = {}
@@ -16,7 +16,8 @@ function Obj:K2_DestroyActor()
     if self._world and self._world.failDestroy then error("K2_DestroyActor: boom") end
     self._dying = true
 end
-function Obj:IsActorBeingDestroyed() return self._dying == true end
+-- As in game (VM probe run 2): a destroyed actor still says false here; only UE's IsValid (KSL) sees it.
+function Obj:IsActorBeingDestroyed() return self._beingDestroyed == true end
 function Obj:GetOwningPlayerPawn() return self._owningPawn end
 function Obj:ReceiveBeginPlay() self._beginPlays = (self._beginPlays or 0) + 1; self._widgetName = self.Name and self.Name:ToString() end
 
@@ -93,6 +94,11 @@ function F.new()
 
     class("LevelWaypointActor_C", "/Game/Graphics/Journal/LevelWaypointActor.LevelWaypointActor_C")
     class("SatelliteWaypoint_C", "/Game/Graphics/Journal/SatelliteWaypoint.SatelliteWaypoint_C")
+    -- UE's IsValid as the UFunction object (callable) and KismetSystemLibrary's class default object.
+    W.kslCalls = 0
+    W.byPath["/Script/Engine.KismetSystemLibrary:IsValid"] = setmetatable({ IsValid = function() return true end }, {
+        __call = function(_, cdo, a) W.kslCalls = W.kslCalls + 1; if W.kslBroken then error("UFunction call failed") end return not (a._dying or a._gone) end })
+    W.byPath["/Script/Engine.Default__KismetSystemLibrary"] = setmetatable({ _path = "/Script/Engine.Default__KismetSystemLibrary", _class = class("KismetSystemLibrary") }, Obj)
     local GS = W.obj("GameplayStatics", "/Script/Engine.Default__GameplayStatics")
     W.gs = GS
     function GS:BeginDeferredActorSpawnFromClass(ctx, cls, xf, coll, owner, scale)
