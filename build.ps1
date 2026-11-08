@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Stages Markers as a release package: build/package/Mods/<name>/{mod.json, Scripts/}, <name> = mod.json "name".
+  Stages Waypoints as a release package: build/package/Mods/<name>/{mod.json, Scripts/}, <name> = mod.json "name".
 .DESCRIPTION
   Writes only build/package/ (ignored by git), deleted first, in the layout tools/release/release.ps1 maps to the
   player zip (_bmad-output/specs/spec-distribution-v0/packages.md): Mods/<name>/mod.json (this repo's, byte for

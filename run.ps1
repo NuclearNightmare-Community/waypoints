@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Runs one Markers scenario end to end: prepare core, deploy (with the test driver), launch, serve key requests, wait,
+  Runs one Waypoints scenario end to end: prepare core, deploy (with the test driver), launch, serve key requests, wait,
   close, restore core, check.
 .DESCRIPTION
   Launches only through the workspace's tools/launch.ps1 (which passes -userdir). Stops when the driver logs its END
@@ -11,20 +11,20 @@
   <seq> to done.txt.
   Scenarios that break core on purpose put it back afterwards, also after a crash or Ctrl+C (and at the start of the
   next run if this one was killed):
-    no-core:  moves Mods/Nucleus to ue4ss/_markers-test-backup/ and takes its line out of mods.txt.
+    no-core:  moves Mods/Nucleus to ue4ss/_waypoints-test-backup/ and takes its line out of mods.txt.
     old-core: sets the installed Nucleus mod.json version to 0.1.0 (the driver publishes it as core's runtime version,
               since a real 0.1.0 core has no UI helpers to build).
   Both first check that deploy.ps1 refuses without -Force (story 1 AC 2 and 3), then deploy with -Force.
-  Keeps the log as <workspace>/dumps/<copy>/markers/<scenario>.log (ignored by git) and runs check.ps1 on it.
+  Keeps the log as <workspace>/dumps/<copy>/waypoints/<scenario>.log (ignored by git) and runs check.ps1 on it.
   Core must already be installed (Nucleus's own deploy.ps1). Steam must be running. Don't type into the game while
   it runs.
   -Target vm runs the scenario in the Hyper-V VM NNB instead (tools/vm/vm-sp.ps1, README "Tests in the VM"): Nucleus
-  from the host's mods/Nucleus/build/package (its own deploy.ps1 -Staged), Markers and the driver (deploy.ps1
+  from the host's mods/Nucleus/build/package (its own deploy.ps1 -Staged), Waypoints and the driver (deploy.ps1
   -Staged, with the same refusal checks for no-core and old-core) go into the VM's copy of the same build, the VM's
   game is launched, Enter is pressed there with tools/vm/vm-key.ps1, and the VM copy is put back as it was
   afterwards. It never builds and never touches the host's game copy or a host game, so it can run while someone
   plays on the host. The log is kept as <scenario>.vm.log and judged with check.ps1 -Target vm.
-  Every Markers scenario runs in the VM too (none judges timing).
+  Every Waypoints scenario runs in the VM too (none judges timing).
 .EXAMPLE
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario revive
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario probe -Target vm
@@ -54,13 +54,13 @@ function Set-DeployTarget([string] $instance) {
     $script:modsTxt  = Join-Path $script:modsDir 'mods.txt'
     $script:log      = Join-Path $script:ue4ss 'UE4SS.log'
     $script:scripts  = Join-Path $script:modsDir "$driver\Scripts"
-    $script:backup   = Join-Path $script:ue4ss '_markers-test-backup'
+    $script:backup   = Join-Path $script:ue4ss '_waypoints-test-backup'
 }
 Set-DeployTarget $inst
 $exeName  = 'NuclearNightmare-Win64-Shipping'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 
-Add-Type -Namespace MarkersRun -Name Win -MemberDefinition @'
+Add-Type -Namespace WaypointsRun -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint msg, System.IntPtr w, System.IntPtr l);
 '@
 
@@ -77,9 +77,9 @@ function Invoke-Request([string] $cmd) {
         $p = Get-OurGame
         $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
         if ($h -eq [IntPtr]::Zero) { Write-Host '  key skipped: no game window'; return }
-        $down = [MarkersRun.Win]::PostMessage($h, 0x0100, [IntPtr]0x0D, [IntPtr]0x001C0001)            # WM_KEYDOWN, VK_RETURN, scan 0x1C
+        $down = [WaypointsRun.Win]::PostMessage($h, 0x0100, [IntPtr]0x0D, [IntPtr]0x001C0001)            # WM_KEYDOWN, VK_RETURN, scan 0x1C
         Start-Sleep -Milliseconds 80
-        $up = [MarkersRun.Win]::PostMessage($h, 0x0101, [IntPtr]0x0D, [IntPtr]([int64]0xC01C0001))   # WM_KEYUP
+        $up = [WaypointsRun.Win]::PostMessage($h, 0x0101, [IntPtr]0x0D, [IntPtr]([int64]0xC01C0001))   # WM_KEYUP
         Write-Host ("  posted ENTER to the game window (down={0} up={1})" -f $down, $up)
     } else { Write-Host "  unknown request: $cmd" }
 }
@@ -150,7 +150,7 @@ function Deploy-Scenario {
 
 if ($Target -eq 'vm') {
     . (Join-Path $root 'tools\vm\vm-sp.ps1')
-    # No Markers scenario judges timing: all of them may run in the VM.
+    # No Waypoints scenario judges timing: all of them may run in the VM.
     Assert-NNBSpScenario -Scenario $Scenario -HostOnly @()
     # Core comes from the host's own build/package, installed by core's own deploy.ps1 (never built here).
     $coreDeploy = Join-Path $root "mods\$CoreName\deploy.ps1"

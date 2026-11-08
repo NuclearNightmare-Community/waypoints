@@ -15,7 +15,7 @@
 --   * A spectator or a playable monster (any other pawn class, or none) is not a revive -> "notfp"; the last
 --     first-person pawn and the death stay remembered, so the real revive later still counts.
 --   * A new world forgets everything (a map change destroys every waypoint actor with the old world).
--- The snapshot of the markers that were up is taken by main.lua at the first `lost` after the pawn attached (the
+-- The snapshot of the waypoints that were up is taken by main.lua at the first `lost` after the pawn attached (the
 -- death) and handed back with the "revive" decision.
 local M = {}
 M.__index = M
@@ -35,7 +35,7 @@ function M:reset(world)
     self.world = world        -- the world the remembered pawn lives in ("World /Game/Maps/...")
     self.pawn = nil           -- path of the last first-person pawn seen with the live HUD
     self.lostSeen = false     -- the HUD was lost since that pawn attached (a death, or the revive's own RemoveAllWidgets)
-    self.snapshot = nil       -- the markers that were up at that first `lost`
+    self.snapshot = nil       -- the waypoints that were up at that first `lost`
     self.revived = nil        -- { pawn, at, action } of the last revive or rebound, for the settle window
 end
 
@@ -45,7 +45,7 @@ function M:loadMap() self:reset(nil) end
 -- attached (later losses keep the snapshot closest to the death).
 function M:wantsSnapshot() return self.pawn ~= nil and not self.lostSeen end
 
--- The HUD left the viewport. snapshot: the markers up right now (a list), or nil if none was taken.
+-- The HUD left the viewport. snapshot: the waypoints up right now (a list), or nil if none was taken.
 function M:lost(snapshot)
     if self.pawn == nil then return { kind = "ignored" } end
     local first = not self.lostSeen

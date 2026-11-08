@@ -6,7 +6,7 @@ Scripts/settings.lua
 build/
 *.log
 # Written by a test run next to the driver (only ever in a game instance, but never commit a stray copy)
-test/MarkersDriver/Scripts/scenario.txt
-test/MarkersDriver/Scripts/request.txt
-test/MarkersDriver/Scripts/done.txt
-test/MarkersDriver/Scripts/kill.txt
+test/WaypointsDriver/Scripts/scenario.txt
+test/WaypointsDriver/Scripts/request.txt
+test/WaypointsDriver/Scripts/done.txt
+test/WaypointsDriver/Scripts/kill.txt

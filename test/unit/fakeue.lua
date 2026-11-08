@@ -1,6 +1,6 @@
 -- A fake UE4SS world for the unit tests: just enough UObjects (actors, widgets, pawns, HUDs, classes, worlds) and
 -- globals (FindAllOf, StaticFindObject, FText, ExecuteInGameThreadWithDelay, RegisterLoadMapPostHook) for game.lua,
--- markers.lua and main.lua to run outside the game. Destroyed actors stay findable (and IsValid) until gc(), as they do
+-- waypoints.lua and main.lua to run outside the game. Destroyed actors stay findable (and IsValid) until gc(), as they do
 -- in the game until the next garbage collection; UE's IsValid (KismetSystemLibrary:IsValid, a UFunction) tells them apart.
 local F = {}
 
@@ -142,8 +142,8 @@ function F.install(W)
     _G.FText = text
     _G.ExecuteInGameThreadWithDelay = function(ms, fn) W.delayed[#W.delayed + 1] = { ms = ms, fn = fn } end
     _G.RegisterLoadMapPostHook = function(fn) W.loadMapHooks[#W.loadMapHooks + 1] = fn end
-    _G.LoopAsync = function() error("Markers must not use LoopAsync") end
-    _G.ExecuteInGameThread = function() error("Markers must not use ExecuteInGameThread") end
+    _G.LoopAsync = function() error("Waypoints must not use LoopAsync") end
+    _G.ExecuteInGameThread = function() error("Waypoints must not use ExecuteInGameThread") end
     _G.print = function(s) W.printed[#W.printed + 1] = (tostring(s):gsub("\n$", "")) end
 end
 

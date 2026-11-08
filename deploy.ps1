@@ -1,20 +1,20 @@
 <#
 .SYNOPSIS
-  Installs Markers into a dev copy of Nuclear Nightmare, or removes it.
+  Installs Waypoints into a dev copy of Nuclear Nightmare, or removes it.
 .DESCRIPTION
   Refuses (exit 1, one line) unless Nucleus (core) is installed in the copy, enabled in mods.txt, and its installed
-  mod.json version satisfies Markers' dependsOn (a minimum, not below the installed core's compat.floor;
+  mod.json version satisfies Waypoints' dependsOn (a minimum, not below the installed core's compat.floor;
   deploy-lib.ps1). -Force installs anyway, for the failure scenarios
-  (Markers' own runtime check then has to catch it).
-  Installs ue4ss/Mods/Markers/{mod.json, Scripts/main.lua, revive.lua, markers.lua, game.lua} and generates
-  Scripts/settings.lua from mod.json's setting defaults (-OnRevive overrides onRevive). Writes "Markers : 1" into
+  (Waypoints' own runtime check then has to catch it).
+  Installs ue4ss/Mods/Waypoints/{mod.json, Scripts/main.lua, revive.lua, waypoints.lua, game.lua} and generates
+  Scripts/settings.lua from mod.json's setting defaults (-OnRevive overrides onRevive). Writes "Waypoints : 1" into
   mods.txt right below Nucleus's line and above "Keybinds : 1", moving it there if it was elsewhere. Never writes
-  outside Mods/Markers, Mods/MarkersDriver and those mods.txt lines, and never bundles any of core's files.
-  -Test also installs the test driver (test/MarkersDriver as Mods/MarkersDriver, between Nucleus and Markers), writes
-  the scenario to its Scripts/scenario.txt, and turns on Markers' DEBUG lines (settings.lua debug = true), which
+  outside Mods/Waypoints, Mods/WaypointsDriver and those mods.txt lines, and never bundles any of core's files.
+  -Test also installs the test driver (test/WaypointsDriver as Mods/WaypointsDriver, between Nucleus and Waypoints), writes
+  the scenario to its Scripts/scenario.txt, and turns on Waypoints' DEBUG lines (settings.lua debug = true), which
   check.ps1 reads. The driver is never shipped.
-  -Remove deletes Mods/Markers, Mods/MarkersDriver and their mods.txt lines; nothing else changes (mods.txt keeps its
-  bytes when it had no Markers lines).
+  -Remove deletes Mods/Waypoints, Mods/WaypointsDriver and their mods.txt lines; nothing else changes (mods.txt keeps its
+  bytes when it had no Waypoints lines).
   -Staged: $Instance is the host-side staging folder of a VM run (run.ps1 -Target vm, tools/vm/vm-sp.ps1), not a game
   copy; only the running-game check is skipped (no game runs from it, and the host's game may be in use meanwhile).
   Pass the main checkout's instance path when running from a worktree.
@@ -67,7 +67,7 @@ if ($Remove) {
     return
 }
 
-# Core: installed, enabled, and a version Markers' dependsOn accepts.
+# Core: installed, enabled, and a version Waypoints' dependsOn accepts.
 $dep = @($manifest.dependsOn | Where-Object { $_.id -eq $CoreName.ToLowerInvariant() })[0]
 if (-not $dep) { throw "mod.json has no dependsOn entry for $($CoreName.ToLowerInvariant())" }
 $coreJson = Join-Path $modsDir "$CoreName\mod.json"
@@ -96,7 +96,7 @@ if ($problem) {
     Write-Warning "forced: $problem"
 }
 
-# Markers' files, and its settings from mod.json.
+# Waypoints' files, and its settings from mod.json.
 $override = @{}
 if ($OnRevive) { $override.onRevive = $OnRevive }
 $settings = ConvertTo-SettingsLua -Manifest $manifest -Override $override -DebugLog:$Test
@@ -107,11 +107,11 @@ Copy-Item (Join-Path $here 'mod.json') (Join-Path $modsDir $name) -Force
 foreach ($f in $files) { Copy-Item (Join-Path $here "Scripts\$f") $dest -Force }
 [IO.File]::WriteAllText((Join-Path $dest 'settings.lua'), $settings, [Text.UTF8Encoding]::new($false))
 
-# mods.txt: below core, above Keybinds. The driver goes between core and Markers (its old-core mode must run before
-# Markers' main.lua).
+# mods.txt: below core, above Keybinds. The driver goes between core and Waypoints (its old-core mode must run before
+# Waypoints' main.lua).
 $add = @($name)
 if ($Test) {
-    Copy-Item (Join-Path $here 'test\MarkersDriver') (Join-Path $modsDir $driver) -Recurse -Force
+    Copy-Item (Join-Path $here 'test\WaypointsDriver') (Join-Path $modsDir $driver) -Recurse -Force
     foreach ($f in 'scenario.txt', 'request.txt', 'done.txt') { Remove-Item (Join-Path $modsDir "$driver\Scripts\$f") -ErrorAction SilentlyContinue }
     [IO.File]::WriteAllText((Join-Path $modsDir "$driver\Scripts\scenario.txt"), $Scenario)
     $add = @($driver, $name)
