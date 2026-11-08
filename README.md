@@ -2,7 +2,7 @@
 
 A Nuclear Nightmare mod (UE4SS Lua, on the Nucleus core) that brings your Journal map waypoints back after a revive.
 
-**0.1.0 = the revive fix only** (spec `_bmad-output/specs/spec-markers-v1/` in the workspace, story 2 plus the repo, bootstrap, deploy and check parts it needs; the mod was called Markers until 2026-11-08). The **Mark all / Clear all** buttons come in a later release, on core's panels and buttons.
+**0.1.0 = the revive fix only** (spec `_bmad-output/specs/spec-markers-v1/` in the workspace, story 2 plus the repo, bootstrap, deploy and check parts it needs). The **Mark all / Clear all** buttons come in a later release, on core's panels and buttons.
 
 ## What it does
 
@@ -83,7 +83,7 @@ $copy = 'C:\...\nuclear-nightmare\game-instances\<copy>'
 
 With `-Target vm`, core comes from `mods/Nucleus/build/package` and Waypoints plus the driver from this repo's `deploy.ps1 -Staged`; the VM copy is put back afterwards. Every Waypoints scenario may run in the VM (none judges timing). Take the workspace's `dumps/vm.lock` around VM runs while other agents share the VM.
 
-**Results in the VM (V8.1.2, 2026-10-26, when the mod was still called Markers; logs `dumps/v8.1.2-build26193463/markers/*.vm.batch2.log`): probe, death and revive all pass.**
+**Results in the VM (V8.1.2, 2026-10-26; logs `dumps/v8.1.2-build26193463/markers/*.vm.batch2.log`): probe, death and revive all pass.**
 - `MapUI_C`'s `Construct` runs on every map open, and every open gets a **new Journal instance** with all its flags rebuilt (4 opens, 4 Journals). So after a revive the Journal is a new instance too (`journal-same-after-revive=no`); the flags it builds take `Selected` from the waypoint actors, which is why "truth is the actor" is enough.
 - `RemoveAllWidgets` stops every waypoint from painting (the bug). A respawned actor paints again (this mod's way, `bReplicates=false`); re-running the actor's `BeginPlay` also works; toggling the widget component's space does not.
 - Liveness: a waypoint its flag just destroyed is still returned by `FindAllOf`, with `IsActorBeingDestroyed() == false` and UE4SS's `IsValid() == true`; UE's own `KismetSystemLibrary:IsValid` (called as the UFunction) is false, and `game.lua` uses it.
@@ -119,7 +119,7 @@ Each run writes `dumps/<copy>/pair/<label>.json` (its `ScenarioReport` holds the
 
 The kill is the character's own `DeathEvent()` (`ExplosionDamage` didn't kill in the VM), called by the machine that controls the character. In `mk-host` the host calls it on its own pawn (once more after 5 s if still possessed). In `mk-client` the host's `DeathEvent()` on B's remote character did nothing (2026-10-27: still possessed after two calls, `TIMEOUT the victim's death`; the event's first branch acts only on the locally controlled pawn), so the host only logs `KILL victim ... signal`, the scenario file then writes `Scripts\kill.txt` into the VM's WaypointsDriver, and B calls `DeathEvent()` on its own pawn (`SELFKILL` lines), then `CallDamageEvent(100)` (the character's server RPC) if still possessed 5 s later. The victim must die neither drowned nor infected (or it becomes a monster: `pair-host` then fails as inconclusive). The hand check above is the fallback.
 
-**Results (V8.1.2, 2026-10-27, friends-only lobby, host + VM, as Markers): `mk-client` PASS, `mk-host` PASS.** Logs and JSON: `dumps/v8.1.2-build26193463/pair/mk-client-20261027-015454.*`, `mk-host-20261027-020047.*`; VM log and screenshots in `dumps/v8.1.2-build26193463/vm/`.
+**Results (V8.1.2, 2026-10-27, friends-only lobby, host + VM): `mk-client` PASS, `mk-host` PASS.** Logs and JSON: `dumps/v8.1.2-build26193463/pair/mk-client-20261027-015454.*`, `mk-host-20261027-020047.*`; VM log and screenshots in `dumps/v8.1.2-build26193463/vm/`.
 - **`mk-client`, the mod on a client (B) of an unmodded host:** a real death (B became `Spectator_C`) and a real reinforcement by the teammate (the host's `BP_Radio_C:Reinformant()`), and the waypoints came back: `RESTORED n=3 (from actors 3, from the snapshot 0, failed 0, old destroyed 3)`, one actor per waypoint, bound to the new pawn, `bReplicates=false`, `DRAWN revive`, `FLAGSMATCH` (Crash Site, Satellite, Weather Station), 7 checks, 0 failures; `pair-host` PASS on the host. The `play` and `end` screenshots show the three waypoints with distances, in white, with the HUD back. The `revived` screenshot came too early (at the new pawn, before `RESTORED`; the scenario now times it from the host's `OK REVIVED`).
 - **Event order on the client:** `SELFKILL` → `LOST ... snapshot n=3` (the HUD lost at the death, 12 s after the first kill call) → `DEAD` as `Spectator_C` → host `REINFORCE` → the new pawn with a HUD 1.7 s later (`NEWPAWN`) → `REVIVE ... snapshot=3` 0.4 s after it → `RESTORED n=3` 0.5 s later (the action delay) → painted. No `AGAIN` and no `REBOUND`: on the client the radio's `RemoveAllWidgets` didn't land after the new HUD, so the settle window wasn't needed (one run).
 - **`mk-host`, the mod on the host with a vanilla client:** the same: `LOST` → `REINFORCE` → `NEWPAWN` 1.6 s later → `REVIVE` 0.8 s later → `RESTORED n=3 ... failed 0` → `DRAWN`, `FLAGSMATCH`, 7 checks, 0 failures; no `AGAIN`. B's screenshots show a normal match, with no notification or chat.
