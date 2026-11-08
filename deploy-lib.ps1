@@ -9,6 +9,10 @@
   . ./deploy-lib.ps1; Test-VersionNeed -Version '0.4.0' -Need '>=0.2.0'   # ok
 #>
 
+# The Scripts/ files a deploy installs and a release ships under ue4ss/Mods/<name>/Scripts/ (deploy.ps1 and
+# build.ps1 both use this list; settings.lua is generated).
+$ModScripts = 'main.lua', 'revive.lua', 'markers.lua', 'game.lua'
+
 # ConvertTo-Semver '0.2.0' -> @{ Major = 0; Minor = 2; Patch = 0 }, or $null when the text isn't plain semver
 # (ASCII digits only, 1-9 per part, nothing after the patch, not even a newline).
 function ConvertTo-Semver {
