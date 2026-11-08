@@ -5,7 +5,7 @@
 -- Local only (scope client): the waypoint actors are local and unreplicated; no RPC, no chat, no replicated actor, and
 -- nothing read from another player. Holds no UObject between callbacks (AGENTS.md): revive.lua sees plain facts, the
 -- deferred action re-finds the new pawn through a weak handle. No per-tick work: it acts on HUD events only.
-local CORE, NEED, ME = "Nucleus", "0.2.0", "Markers"
+local CORE, NEED, ME = "Nucleus", ">=0.2.0", "Markers"
 local DELAY_MS = 500 -- after the revive's HUD event, so the game has finished possessing the new pawn
 local SNAPSHOT_MS = 50 -- the snapshot at the death runs this much later, outside core's HUD tick (it costs about 2 ms)
 

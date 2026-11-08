@@ -5,7 +5,7 @@
   "scope": "client",
   "game": { "version": "V8.1.2", "build": "26193463" },
   "ue4ss": "v3.0.1-1181-g83330635",
-  "dependsOn": [ { "id": "nucleus", "version": "^0.2.0" } ],
+  "dependsOn": [ { "id": "nucleus", "version": ">=0.2.0" } ],
   "settings": {
     "onRevive": { "type": "enum", "values": [ "restore", "clear" ], "default": "restore",
                   "label": "After a revive, your map markers", "changeable": "anytime" }

@@ -3,8 +3,9 @@
   Installs Markers into a dev copy of Nuclear Nightmare, or removes it.
 .DESCRIPTION
   Refuses (exit 1, one line) unless Nucleus (core) is installed in the copy, enabled in mods.txt, and its installed
-  mod.json version satisfies Markers' dependsOn (^ rules, deploy-lib.ps1). -Force installs anyway, for the failure
-  scenarios (Markers' own runtime check then has to catch it).
+  mod.json version satisfies Markers' dependsOn (a minimum, not below the installed core's compat.floor;
+  deploy-lib.ps1). -Force installs anyway, for the failure scenarios
+  (Markers' own runtime check then has to catch it).
   Installs ue4ss/Mods/Markers/{mod.json, Scripts/main.lua, revive.lua, markers.lua, game.lua} and generates
   Scripts/settings.lua from mod.json's setting defaults (-OnRevive overrides onRevive). Writes "Markers : 1" into
   mods.txt right below Nucleus's line and above "Keybinds : 1", moving it there if it was elsewhere. Never writes
@@ -77,10 +78,15 @@ if (-not (Test-Path $coreJson)) {
     $core = $null
     try { $core = Get-Content $coreJson -Raw | ConvertFrom-Json } catch { }
     $state = Get-ModsTxtState -Lines $clean -Name $CoreName
+    $floor = $null
+    try { $floor = $core.compat.floor } catch { }
+    $fit = if ($core) { Test-VersionNeed -Version $core.version -Need $dep.version -Floor $floor }
     if (-not $core -or $core.id -ne $dep.id) {
         $problem = "$coreJson is not $CoreName's manifest (id '$($core.id)', expected '$($dep.id)')."
-    } elseif (-not (Test-CaretRange -Version $core.version -Range $dep.version)) {
+    } elseif ($fit -in 'core-too-old', 'bad-have') {
         $problem = "$CoreName $($core.version) is installed, but $name needs $($dep.version); update $CoreName."
+    } elseif ($fit -eq 'mod-too-old') {
+        $problem = "$name was made for $CoreName $($dep.version), which this $CoreName $($core.version) no longer supports (oldest: $floor); update $name."
     } elseif ($state -ne 'enabled') {
         $problem = "$CoreName is installed but $state in mods.txt; enable it ('$CoreName : 1', its first line)."
     }

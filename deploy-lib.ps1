@@ -1,37 +1,58 @@
 <#
 .SYNOPSIS
   Pure helpers for deploy.ps1 (dot-source it), testable on their own (test/unit/deploy_test.ps1).
-  Caret ranges use the same rule as core's nucleus.semver (api-contract.md, "mod.json"): for 0.x, the same major
-  and minor and at least the patch; from 1.0.0, the same major and at least the minor and patch. Versions are plain MAJOR.MINOR.PATCH; anything else is not a version.
+  Version needs use the same rule as core's nucleus.semver (api-contract.md, "Versioning"; core story 18): a need is
+  a minimum. ">=X.Y.Z", the old caret form "^X.Y.Z" and a bare "X.Y.Z" all mean "this version or newer", and a need
+  below the installed core's compatibility floor (its mod.json "compat.floor") is refused. Versions are plain
+  MAJOR.MINOR.PATCH; anything else is not a version.
 .EXAMPLE
-  . ./deploy-lib.ps1; Test-CaretRange -Version '0.2.1' -Range '^0.2.0'   # True
+  . ./deploy-lib.ps1; Test-VersionNeed -Version '0.4.0' -Need '>=0.2.0'   # ok
 #>
 
-# ConvertTo-Semver '0.2.0' -> @{ Major = 0; Minor = 2; Patch = 0 }, or $null when the text isn't plain semver.
+# ConvertTo-Semver '0.2.0' -> @{ Major = 0; Minor = 2; Patch = 0 }, or $null when the text isn't plain semver
+# (ASCII digits only, 1-9 per part, nothing after the patch, not even a newline).
 function ConvertTo-Semver {
     param([AllowNull()] [AllowEmptyString()] [object] $Text)
     if ($Text -isnot [string]) { return $null }
-    if ($Text -notmatch '^(\d{1,9})\.(\d{1,9})\.(\d{1,9})$') { return $null }
+    if ($Text -notmatch '\A([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})\z') { return $null }
     return @{ Major = [int]$Matches[1]; Minor = [int]$Matches[2]; Patch = [int]$Matches[3] }
 }
 
-# Test-CaretRange -Version <have> -Range '^<need>' -> $true | $false. A range that isn't '^' plus plain semver throws
-# (it's our own mod.json, so that's a bug to fix, not a reason to refuse an install). A version that isn't plain
-# semver (an installed mod.json we don't control) is simply not compatible.
-function Test-CaretRange {
+# ConvertFrom-VersionNeed '>=0.2.0' -> the minimum as ConvertTo-Semver gives it, or $null when the text isn't
+# ">=X.Y.Z", "^X.Y.Z" or "X.Y.Z" (at most 64 bytes, as core's semver.parseNeed).
+function ConvertFrom-VersionNeed {
+    param([AllowNull()] [AllowEmptyString()] [object] $Need)
+    if ($Need -isnot [string] -or $Need.Length -eq 0 -or $Need.Length -gt 64) { return $null }
+    $body = if ($Need.StartsWith('>=')) { $Need.Substring(2) } elseif ($Need.StartsWith('^')) { $Need.Substring(1) } else { $Need }
+    return ConvertTo-Semver $body
+}
+
+# Compare-Semver a b -> -1 | 0 | 1 for two ConvertTo-Semver results.
+function Compare-Semver {
+    param([Parameter(Mandatory)] $A, [Parameter(Mandatory)] $B)
+    foreach ($k in 'Major', 'Minor', 'Patch') { if ($A[$k] -ne $B[$k]) { return $(if ($A[$k] -lt $B[$k]) { -1 } else { 1 }) } }
+    return 0
+}
+
+# Test-VersionNeed -Version <have> -Need <need> [-Floor <floor>] -> 'ok' | 'core-too-old' | 'mod-too-old' | 'bad-have',
+# as core's semver.check: 'bad-have' when the installed version isn't plain semver (an installed mod.json we don't
+# control: simply not compatible), 'core-too-old' when it is below the need's minimum, 'mod-too-old' when the minimum
+# is below the floor. A floor that is missing or not plain semver means no floor. A need that isn't ">=X.Y.Z",
+# "^X.Y.Z" or "X.Y.Z" throws (it's our own mod.json, so that's a bug to fix, not a reason to refuse an install).
+function Test-VersionNeed {
     param(
         [AllowNull()] [AllowEmptyString()] [object] $Version,
-        [Parameter(Mandatory)] [string] $Range
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $Need,
+        [AllowNull()] [AllowEmptyString()] [object] $Floor
     )
-    if ($Range -notmatch '^\^(.+)$') { throw "unsupported version range '$Range' (only ^MAJOR.MINOR.PATCH)" }
-    $n = ConvertTo-Semver $Matches[1]
-    if (-not $n) { throw "unsupported version range '$Range' (only ^MAJOR.MINOR.PATCH)" }
+    $n = ConvertFrom-VersionNeed $Need
+    if (-not $n) { throw "unsupported version need '$Need' (only >=MAJOR.MINOR.PATCH, ^MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH)" }
     $h = ConvertTo-Semver $Version
-    if (-not $h) { return $false }
-    if ($h.Major -ne $n.Major) { return $false }
-    if ($n.Major -eq 0) { return ($h.Minor -eq $n.Minor) -and ($h.Patch -ge $n.Patch) }
-    if ($h.Minor -ne $n.Minor) { return $h.Minor -gt $n.Minor }
-    return $h.Patch -ge $n.Patch
+    if (-not $h) { return 'bad-have' }
+    if ((Compare-Semver $h $n) -lt 0) { return 'core-too-old' }
+    $f = ConvertTo-Semver $Floor
+    if ($f -and (Compare-Semver $n $f) -lt 0) { return 'mod-too-old' }
+    return 'ok'
 }
 
 # Edit-ModsTxt -Lines <mods.txt lines> -Remove <names> -Add <names in order> -After <name> -> new lines.

@@ -26,7 +26,7 @@ $copy = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'   # absol
 ./deploy.ps1 -Instance $copy -Remove
 ```
 
-`deploy.ps1` refuses (one line, exit 1) when Nucleus is missing, disabled or not `^0.2.0`; it writes `Markers : 1` right below Nucleus's line in `mods.txt` (above `Keybinds : 1`) and generates `Scripts/settings.lua` from `mod.json`. Without a compatible core, the mod logs exactly one `[Markers]` line naming the cause and does nothing.
+`deploy.ps1` refuses (one line, exit 1) when Nucleus is missing, disabled, older than 0.2.0 (`dependsOn` `>=0.2.0`) or has a `compat.floor` above it (the `>=` form is read by Nucleus 0.5.0 and newer, core story 18); it writes `Markers : 1` right below Nucleus's line in `mods.txt` (above `Keybinds : 1`) and generates `Scripts/settings.lua` from `mod.json`. Without a compatible core, the mod logs exactly one `[Markers]` line naming the cause and does nothing.
 
 ## The setting
 
@@ -44,7 +44,7 @@ $copy = 'C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463'   # absol
 
 ## How it works
 
-- `Scripts/main.lua`: the dependent bootstrap (`connect{ mod = "Markers", need = "0.2.0" }`), settings, and the wiring: one `core.ui.hud.watch` watcher and a `LoadMap` post-hook. No loop, no per-tick work.
+- `Scripts/main.lua`: the dependent bootstrap (`connect{ mod = "Markers", need = ">=0.2.0" }`), settings, and the wiring: one `core.ui.hud.watch` watcher and a `LoadMap` post-hook. No loop, no per-tick work.
 - `Scripts/revive.lua` (pure): decides from HUD events alone. On each `attached` it reads the local pawn (the HUD's own `Player`, else its owning player's pawn). A **revive** is the pawn becoming a new `BP_FirstPersonCharacter_C` in the same world after the HUD was lost (the death's `RemoveAllWidgets`). Never `ReceivePossess` (it runs only where the controller has authority). A spectator or monster pawn is not a revive. A new pawn with no HUD loss in between is a **rebound** (restore only, never clear). Within 15 s after a revive, the new pawn's HUD coming back once more (a client's revive multicast can land after the new HUD) re-runs the action (**again**). A new world forgets everything.
 - At the first HUD loss (the death) it takes a **snapshot** of the markers up (name, kind, location: plain data).
 - `Scripts/markers.lua` (pure, over an adapter): **restore** spawns a fresh waypoint actor for every marker up (every live actor, plus any snapshot entry whose actor vanished), bound to the new pawn, and only then destroys the old one, so a failed spawn leaves the game's own state; duplicates collapse to one. **Clear** destroys them all. Both then set every flag's `Selected` from the actors (truth is the actor, not the flag) and bind the flags to the new pawn.
@@ -60,7 +60,7 @@ Log lines (`[Markers]`): `READY onRevive=...`, `PAWN first ...`, `LOST pawn=... 
 ./test.ps1            # or ./check.ps1 -Scenario unit
 ```
 
-Lua (`texlua`, MiKTeX's Lua 5.3, or any Lua 5.3/5.4): `revive_test` (the detector against fake HUD events and pawn paths), `markers_test` (snapshot, restore, clear and `game.lua` over a fake UE4SS world, failure paths), `main_test` (bootstrap, settings both ways and changed between revives, the whole HUD-event-to-restore path over a fake core), `driver_test` (the test driver loads every scenario). PowerShell: `deploy_test` (caret ranges, mods.txt, enum settings, deploy.ps1 end to end on a fake copy), `check_test` (check.ps1 against synthetic logs, each passing as written and failing after one change).
+Lua (`texlua`, MiKTeX's Lua 5.3, or any Lua 5.3/5.4): `revive_test` (the detector against fake HUD events and pawn paths), `markers_test` (snapshot, restore, clear and `game.lua` over a fake UE4SS world, failure paths), `main_test` (bootstrap, settings both ways and changed between revives, the whole HUD-event-to-restore path over a fake core), `driver_test` (the test driver loads every scenario). PowerShell: `deploy_test` (version needs, mods.txt, enum settings, deploy.ps1 end to end on a fake copy), `check_test` (check.ps1 against synthetic logs, each passing as written and failing after one change).
 
 ### Single-player scenarios (`run.ps1`, host or VM)
 

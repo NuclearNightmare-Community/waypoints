@@ -133,7 +133,7 @@ function Deploy-Scenario {
     if ($Scenario -in 'no-core', 'old-core') {
         Break-Core
         $r = Invoke-Deploy @()
-        $why = if ($Scenario -eq 'no-core') { "$CoreName is not installed" } else { "$CoreName 0\.1\.0 is installed, but $name needs \^" }
+        $why = if ($Scenario -eq 'no-core') { "$CoreName is not installed" } else { "$CoreName 0\.1\.0 is installed, but $name needs >=" }
         if ($r.Code -eq 1 -and $r.Out -match "^$name not deployed: $why" -and ($r.Out -split "`r?`n").Count -eq 1) {
             Write-Host "ok:   deploy.ps1 refused without -Force: $($r.Out)"
         } else {

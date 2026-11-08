@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Unit tests for deploy-lib.ps1 (caret ranges, mods.txt editing, settings.lua) and deploy.ps1 end to end against a
+  Unit tests for deploy-lib.ps1 (version needs, mods.txt editing, settings.lua) and deploy.ps1 end to end against a
   fake game instance in a temp folder (never a real copy: no game, no UE4SS, only the files deploy.ps1 looks at).
 .EXAMPLE
   pwsh -NoProfile -File test/unit/deploy_test.ps1
@@ -17,22 +17,46 @@ function Throws([scriptblock] $b, [string] $text, [string] $name) {
     try { & $b; Ok $false $name 'did not throw' } catch { Ok ($_.Exception.Message -like "*$text*") $name $_.Exception.Message }
 }
 
-# ---------------------------------------------------------------- caret ranges (same cases as core's semver.lua rule)
+# ---------------------------------------------------------------- version needs (core story 18: the same cases as
+# core's semver.check and AC 1-3: a need is a minimum; ^ and a bare version read as >=; the floor refuses older needs)
 $cases = @(
-    @('0.2.0', '^0.2.0', $true), @('0.2.1', '^0.2.0', $true), @('0.2.10', '^0.2.3', $true), @('0.2.2', '^0.2.3', $false),
-    @('0.1.0', '^0.2.0', $false), @('0.3.0', '^0.2.0', $false), @('1.2.0', '^0.2.0', $false),
-    @('1.0.0', '^1.0.0', $true), @('1.4.0', '^1.2.3', $true), @('1.2.3', '^1.2.3', $true), @('1.2.2', '^1.2.3', $false),
-    @('1.1.9', '^1.2.0', $false), @('2.0.0', '^1.2.0', $false), @('1.10.0', '^1.9.0', $true),
-    @('0.0.3', '^0.0.3', $true), @('0.0.4', '^0.0.3', $true), @('0.1.3', '^0.0.3', $false),
-    @('0.2', '^0.2.0', $false), @('0.2.0-beta', '^0.2.0', $false), @('v0.2.0', '^0.2.0', $false), @(' 0.2.0', '^0.2.0', $false),
-    @('', '^0.2.0', $false), @($null, '^0.2.0', $false), @(2, '^0.2.0', $false), @('00.2.0', '^0.2.0', $true)
+    # AC 1: core 0.4.0 accepts older and equal needs, in all three forms.
+    @('0.4.0', '>=0.1.0', $null, 'ok'), @('0.4.0', '>=0.2.0', $null, 'ok'), @('0.4.0', '>=0.3.0', $null, 'ok'),
+    @('0.4.0', '>=0.4.0', $null, 'ok'), @('0.4.0', '^0.2.0', $null, 'ok'), @('0.4.0', '^0.3.0', $null, 'ok'),
+    @('0.4.0', '0.2.0', $null, 'ok'), @('0.4.0', '0.3.0', $null, 'ok'), @('0.4.0', '>=0.2.0', '0.1.0', 'ok'),
+    # AC 2: core 0.4.0 is older than a 0.5.0 need.
+    @('0.4.0', '>=0.5.0', $null, 'core-too-old'), @('0.4.0', '^0.5.0', $null, 'core-too-old'), @('0.4.0', '0.5.0', $null, 'core-too-old'),
+    @('0.4.0', '>=0.5.0', '0.1.0', 'core-too-old'),
+    # AC 3: with the floor at 0.3.0, a need below it is the mod's problem; at the floor it is fine.
+    @('0.4.0', '>=0.2.0', '0.3.0', 'mod-too-old'), @('0.4.0', '^0.2.0', '0.3.0', 'mod-too-old'), @('0.4.0', '>=0.3.0', '0.3.0', 'ok'),
+    @('0.4.0', '>=0.5.0', '0.3.0', 'core-too-old'),
+    # The old caret's limits are gone: newer minors and majors satisfy an older need.
+    @('0.2.0', '>=0.2.0', $null, 'ok'), @('0.2.1', '>=0.2.0', $null, 'ok'), @('0.3.0', '^0.2.0', $null, 'ok'),
+    @('1.2.0', '^0.2.0', $null, 'ok'), @('2.0.0', '>=1.2.0', $null, 'ok'), @('0.10.0', '>=0.9.0', $null, 'ok'),
+    @('0.2.2', '>=0.2.3', $null, 'core-too-old'), @('0.1.9', '>=0.2.0', $null, 'core-too-old'), @('1.9.9', '>=2.0.0', $null, 'core-too-old'),
+    # An installed version that isn't plain semver is not compatible.
+    @('0.2', '>=0.2.0', $null, 'bad-have'), @('0.2.0-beta', '>=0.2.0', $null, 'bad-have'), @('v0.2.0', '>=0.2.0', $null, 'bad-have'),
+    @(' 0.2.0', '>=0.2.0', $null, 'bad-have'), @("0.2.0`n", '>=0.2.0', $null, 'bad-have'), @('', '>=0.2.0', $null, 'bad-have'),
+    @($null, '>=0.2.0', $null, 'bad-have'), @(2, '>=0.2.0', $null, 'bad-have'), @('00.2.0', '>=0.2.0', $null, 'ok'),
+    # A floor that isn't plain semver (an installed mod.json we don't control) means no floor, as in core.
+    @('0.4.0', '>=0.2.0', 'x', 'ok'), @('0.4.0', '>=0.2.0', '', 'ok'), @('0.4.0', '>=0.2.0', 3, 'ok')
 )
-foreach ($c in $cases) { Eq (Test-CaretRange -Version $c[0] -Range $c[1]) $c[2] "caret: '$($c[0])' satisfies '$($c[1])'" }
-Throws { Test-CaretRange -Version '0.2.0' -Range '0.2.0' } 'unsupported version range' 'caret: a range without ^ throws'
-Throws { Test-CaretRange -Version '0.2.0' -Range '~0.2.0' } 'unsupported version range' 'caret: ~ throws'
-Throws { Test-CaretRange -Version '0.2.0' -Range '^0.2' } 'unsupported version range' 'caret: short range throws'
+foreach ($c in $cases) {
+    Eq (Test-VersionNeed -Version $c[0] -Need $c[1] -Floor $c[2]) $c[3] "need: '$($c[0])' for '$($c[1])' (floor '$($c[2])')"
+}
+# A need that isn't >=X.Y.Z, ^X.Y.Z or X.Y.Z is a bug in our own mod.json: it throws (AC 5's bad needs).
+foreach ($bad in @('', '>=', '>=x', '>=1.2', '<0.3.0', '~0.3.0', ('>=0.2.0' + ('0' * 293)), '3', '>= 0.3.0', '>=1234567890.0.0',
+        '=0.3.0', '>=0.3.0 ', ">=0.3.0`n", '>=^0.3.0', '^>=0.3.0', '>=0.3.0.0', '>=0.3.0-beta')) {
+    Throws { Test-VersionNeed -Version '0.4.0' -Need $bad } 'unsupported version need' "need: '$bad' throws"
+}
+Eq ('>=0.2.0' + ('0' * 293)).Length 300 'need: the long case is 300 characters'
+Ok ($null -eq (ConvertFrom-VersionNeed ('>=0.' + ('1' * 61)))) 'need: over 64 bytes is not a need'
+Eq ((ConvertFrom-VersionNeed '>=0.2.0').Minor) 2 'need: >= parses to its minimum'
+Eq ((ConvertFrom-VersionNeed '^1.2.3').Patch) 3 'need: ^ parses to its minimum'
+Ok ($null -eq (ConvertFrom-VersionNeed 3)) 'need: a non-string is not a need'
 Eq ((ConvertTo-Semver '1.2.3').Minor) 2 'semver: parse'
 Ok ($null -eq (ConvertTo-Semver '1.2.3.4')) 'semver: four parts is not a version'
+Ok ($null -eq (ConvertTo-Semver ('1.2.' + [char]0x0663))) 'semver: non-ASCII digits are not a version'
 
 # ---------------------------------------------------------------- mods.txt editing
 $stock = @('CheatManagerEnablerMod : 1', 'ActorDumperMod : 0', 'BPModLoaderMod : 1', 'Keybinds : 1', '', '; comment')
@@ -87,11 +111,11 @@ Eq $m.settings.onRevive.changeable 'anytime' 'mod.json: changeable anytime'
 Eq (@($m.settings.onRevive.values) -join ',') 'restore,clear' 'mod.json: values restore, clear'
 Eq $m.settings.onRevive.default 'restore' 'mod.json: default restore'
 Ok ($m.id -eq 'markers' -and $m.name -eq 'Markers' -and $m.version -eq '0.1.0' -and $m.scope -eq 'client') 'mod.json: id, name, version, scope'
-Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '^0.2.0') 'mod.json: dependsOn nucleus ^0.2.0'
+Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '>=0.2.0') 'mod.json: dependsOn nucleus >=0.2.0 (a minimum, core story 18)'
 Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.1.2' -and $m.game.build -eq '26193463') 'mod.json: ue4ss and game build'
 # The runtime need in main.lua equals dependsOn's minimum.
 $mainLua = Get-Content (Join-Path $repo 'Scripts\main.lua') -Raw
-Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", "0\.2\.0", "Markers"') 'main.lua: need = dependsOn minimum (0.2.0)'
+Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", ">=0.2.0", "Markers"') 'main.lua: need = dependsOn (>=0.2.0)'
 
 # ---------------------------------------------------------------- mods.txt bytes
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("markers-deploy-test-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -119,7 +143,10 @@ try {
     $coreTxt = "Nucleus : 1`r`n" + $stockTxt
     $modsTxt = Join-Path $mods 'mods.txt'
     $coreJson = Join-Path $mods 'Nucleus\mod.json'
-    function Set-Core([string] $version) { Set-Content $coreJson "{ `"id`": `"nucleus`", `"name`": `"Nucleus`", `"version`": `"$version`" }" }
+    function Set-Core([string] $version, [string] $floor) {
+        $compat = if ($floor) { ", `"compat`": { `"floor`": `"$floor`" }" } else { '' }
+        Set-Content $coreJson "{ `"id`": `"nucleus`", `"name`": `"Nucleus`", `"version`": `"$version`"$compat }"
+    }
     # Each deploy runs in its own pwsh (it ends with exit), with Get-Process stubbed: a real game may be running.
     function Deploy([string[]] $a) {
         $cmd = "function Get-Process { }; & '$(Join-Path $repo 'deploy.ps1')' -Instance '$inst' $($a -join ' '); exit `$LASTEXITCODE"
@@ -137,15 +164,28 @@ try {
     Ok (-not (Test-Path (Join-Path $mods 'Markers'))) 'deploy: refused -> nothing installed'
     Eq (Txt) $stockTxt 'deploy: refused -> mods.txt untouched'
 
-    # Core too old (0.1.0) and too new (0.3.0).
+    # Core too old (0.1.0); a newer core is fine, with or without a floor; a floor above the need refuses, naming the
+    # mod (core story 18 AC 1-3).
     New-Item -ItemType Directory -Force (Join-Path $mods 'Nucleus\Scripts') | Out-Null
     [IO.File]::WriteAllText($modsTxt, $coreTxt)
     Set-Core '0.1.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.1\.0 is installed, but Markers needs \^0\.2\.0; update Nucleus\.') 'deploy: core 0.1.0 -> refused, naming both versions' $d.Out
-    Set-Core '0.3.0'
+    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.1\.0 is installed, but Markers needs >=0\.2\.0; update Nucleus\.') 'deploy: core 0.1.0 -> refused, naming both versions' $d.Out
+    Set-Core '0.4.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.3\.0 is installed') 'deploy: core 0.3.0 -> refused' $d.Out
+    Ok ($d.Code -eq 0) 'deploy: core 0.4.0 (a newer minor) -> installed' $d.Out
+    Set-Core '0.5.0' '0.1.0'
+    $d = Deploy @()
+    Ok ($d.Code -eq 0) 'deploy: core 0.5.0, floor 0.1.0 -> installed' $d.Out
+    Set-Core '0.5.0' '0.3.0'
+    $d = Deploy @()
+    Ok ($d.Code -eq 1 -and $d.Out -match '^Markers not deployed: Markers was made for Nucleus >=0\.2\.0, which this Nucleus 0\.5\.0 no longer supports \(oldest: 0\.3\.0\); update Markers\.') 'deploy: floor 0.3.0 above the need -> refused, naming the mod' $d.Out
+    Ok (($d.Out.Trim() -split "`r?`n").Count -eq 1) 'deploy: the floor refusal is one line' $d.Out
+    Set-Core '0.5.0' 'soon'
+    $d = Deploy @()
+    Ok ($d.Code -eq 0) 'deploy: a floor that is not X.Y.Z is no floor (as core)' $d.Out
+    Deploy @('-Remove') | Out-Null
+    [IO.File]::WriteAllText($modsTxt, $coreTxt)
     Set-Content $coreJson 'not json'
     $d = Deploy @()
     Ok ($d.Code -eq 1 -and $d.Out -match "is not Nucleus's manifest") 'deploy: unreadable core mod.json -> refused' $d.Out

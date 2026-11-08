@@ -31,7 +31,7 @@ $CoreName = 'Nucleus'
 $manifest = Get-Content (Join-Path $PSScriptRoot 'mod.json') -Raw | ConvertFrom-Json
 $name = $manifest.name
 $C = [regex]::Escape($name); $D = [regex]::Escape("${name}Driver"); $K = [regex]::Escape($CoreName)
-$needVer = ($manifest.dependsOn | Where-Object id -eq $CoreName.ToLowerInvariant()).version.TrimStart('^')
+$needVer = ($manifest.dependsOn | Where-Object id -eq $CoreName.ToLowerInvariant()).version
 $NeedRx = [regex]::Escape($needVer)
 if (-not $Log) {
     if (-not $Instance) { Write-Host 'FAIL: pass -Log <file> or -Instance <copy>'; exit 1 }
@@ -115,7 +115,7 @@ $expect = @{
     'old-core' = @(
         "#1|\[$C\] "
         "\[$D\] OLDCORE published $($K.ToLowerInvariant())\.version=0\.1\.0 "
-        "\[$C\] ERROR $K 0\.1\.0 is not compatible; $C needs $NeedRx \(\^ rules\)\. Update $K\. $C will not run\.\s*$"
+        "\[$C\] ERROR $K 0\.1\.0 is older than $C needs \($NeedRx\)\. Update $K\. $C will not run\.\s*$"
         "\[$D\] OK NOMARKERS match1 "
         "\[$D\] END result=PASS"
     )

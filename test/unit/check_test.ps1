@@ -114,10 +114,10 @@ $noCore = @((U "Starting Lua mod 'MarkersDriver'"), (Dr 'SCENARIO no-core'), (U 
 Expect $noCore 'no-core' 0 'no-core: passes as written' 'All checks passed'
 Expect ($noCore + @(M 'READY onRevive=restore')) 'no-core' 1 'no-core: a second Markers line -> fails' '#1'
 $oldCore = @((U "Starting Lua mod 'Nucleus'"), (Dr 'SCENARIO old-core'), (Dr 'OLDCORE published nucleus.version=0.1.0 (from Nucleus''s installed mod.json)'),
-    (M 'ERROR Nucleus 0.1.0 is not compatible; Markers needs 0.2.0 (^ rules). Update Nucleus. Markers will not run.'),
+    (M 'ERROR Nucleus 0.1.0 is older than Markers needs (>=0.2.0). Update Nucleus. Markers will not run.'),
     (Dr 'OK NOMARKERS match1 reached the match'), $endPass)
 Expect $oldCore 'old-core' 0 'old-core: passes as written' 'All checks passed'
-Expect ($oldCore -replace 'needs 0\.2\.0', 'needs 0.3.0') 'old-core' 1 'old-core: the need must be dependsOn''s minimum' 'not compatible'
+Expect ($oldCore -replace 'needs \(>=0\.2\.0\)', 'needs (>=0.3.0)') 'old-core' 1 'old-core: the need must be dependsOn''s version' 'is older than'
 
 # ---------------------------------------------------------------- pair
 $victim = (Start-Log 'pair-victim') + @(

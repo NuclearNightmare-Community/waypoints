@@ -110,9 +110,9 @@ do
     boot()
     eq(#S.connects, 1, "connect called once")
     local c = S.connects[1]
-    ok(c.mod == "Markers" and c.need == "0.2.0", "connect{ mod = 'Markers', need = '0.2.0' }", tostring(c.mod) .. " " .. tostring(c.need))
+    ok(c.mod == "Markers" and c.need == ">=0.2.0", "connect{ mod = 'Markers', need = '>=0.2.0' }", tostring(c.mod) .. " " .. tostring(c.need))
     eq(#W.printed, 0, "nothing printed during main.lua")
-    c.onFail("Nucleus 0.1.0 is not compatible; Markers needs 0.2.0 (^ rules). Update Nucleus.")
+    c.onFail("Nucleus 0.1.0 is older than Markers needs (>=0.2.0). Update Nucleus.")
     eq(#W.printed, 0, "onFail adds no line (connect logged the cause)")
 end
 do -- core without HUD events: one ERROR, nothing registered.
