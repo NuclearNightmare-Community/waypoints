@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Runs Markers' unit tests, no game needed: the Lua tests (revive.lua, markers.lua with game.lua, main.lua against a
+  Runs Waypoints' unit tests, no game needed: the Lua tests (revive.lua, waypoints.lua with game.lua, main.lua against a
   fake core and world, the driver's load test) and the PowerShell tests (deploy-lib.ps1 and deploy.ps1 against a fake instance, check.ps1
   against synthetic logs). check.ps1 -Scenario unit runs this too.
   Lua: the first of lua, lua5.4, lua54, lua5.3, texlua (MiKTeX's texlua.exe is Lua 5.3) found on PATH; -Lua picks one.
@@ -18,7 +18,7 @@ try {
     if ($Only -in 'all', 'lua') {
         if (-not $Lua) { Write-Host 'FAIL: no Lua 5.3/5.4 interpreter on PATH (lua, texlua, ...); pass -Lua'; $failed += 'lua' }
         else {
-            foreach ($t in 'revive_test', 'markers_test', 'main_test', 'driver_test') {
+            foreach ($t in 'revive_test', 'waypoints_test', 'main_test', 'driver_test') {
                 # texlua prints a MiKTeX update reminder on stderr; only the test's own output matters.
                 $out = & $Lua "test/unit/$t.lua" 2>$null
                 $code = $LASTEXITCODE

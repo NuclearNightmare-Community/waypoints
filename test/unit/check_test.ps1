@@ -9,14 +9,14 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path (Split-Path $PSScriptRoot)
 $check = Join-Path $repo 'check.ps1'
 $script:passed = 0; $script:failed = 0
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("markers-check-test-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("waypoints-check-test-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory $tmp | Out-Null
 
 $script:t = 0
 function L([string] $tag, [string] $msg) { $script:t++; "[2026-10-26 01:00:{0:D2}.{1:D7}] [Lua] [$tag] $msg" -f [int]($script:t / 1000 % 60), $script:t }
 function U([string] $msg) { $script:t++; "[2026-10-26 01:00:00.{0:D7}] $msg" -f $script:t }
-function M([string] $msg) { L 'Markers' $msg }
-function Dr([string] $msg) { L 'MarkersDriver' $msg }
+function M([string] $msg) { L 'Waypoints' $msg }
+function Dr([string] $msg) { L 'WaypointsDriver' $msg }
 
 function Run([string[]] $log, [string] $scenario, [string] $target = 'host') {
     $p = Join-Path $tmp "$scenario-$([guid]::NewGuid().ToString('N').Substring(0, 6)).log"
@@ -37,7 +37,7 @@ $P2 = '/Game/Maps/SmallLoweIsland/SmallMap.SmallMap:PersistentLevel.BP_FirstPers
 $P3 = '/Game/Maps/SmallLoweIsland/SmallMap.SmallMap:PersistentLevel.BP_FirstPersonCharacter_C_2147481000'
 function Start-Log([string] $scenario, [string] $onRevive = 'restore') { @(
     (U "Starting Lua mod 'Nucleus'"), (L 'Nucleus' 'READY version=0.2.0 native=0.2.0 ue4ss=v3.0.1-1181-g83330635 boot=1'),
-    (U "Starting Lua mod 'MarkersDriver'"), (Dr "SCENARIO $scenario"), (Dr 'LOADED 40 steps'), (U "Starting Lua mod 'Markers'"),
+    (U "Starting Lua mod 'WaypointsDriver'"), (Dr "SCENARIO $scenario"), (Dr 'LOADED 40 steps'), (U "Starting Lua mod 'Waypoints'"),
     (M 'CONNECT ok Nucleus 0.2.0 (pong 0.2.0 boot=1)'), (M "READY onRevive=$onRevive"),
     (M 'DEBUG hud tick n=120 poll avg 20 max 90'), (M "PAWN first $P1")) }
 function Restored([string] $n = '3') { @(
@@ -46,14 +46,14 @@ function Restored([string] $n = '3') { @(
     (M "RESTORE satellite 'Satellite' respawned bReplicates=false via BeginDeferredActorSpawnFromClass"),
     (M "RESTORED n=$n (from actors 3, from the snapshot 0, failed 0, old destroyed 3) flags=6 satelliteFlags=1")) }
 function DriverRestored([string] $p) { @(
-    (Dr "OK ONE $p exactly one waypoint actor per marker (3 markers, 3 actors)"), (Dr "OK BOUND $p every location waypoint's Character is the new pawn"),
-    (Dr "OK LOCAL $p every waypoint actor has bReplicates=false"), (Dr "OK DRAWN $p every marker's waypoint is painted"),
+    (Dr "OK ONE $p exactly one waypoint actor per waypoint (3 waypoints, 3 actors)"), (Dr "OK BOUND $p every location waypoint's Character is the new pawn"),
+    (Dr "OK LOCAL $p every waypoint actor has bReplicates=false"), (Dr "OK DRAWN $p every waypoint's waypoint is painted"),
     (Dr "OK FLAGSMATCH $p the map shows exactly the marked flags selected (Crash Site,Satellite,Weather Station)")) }
 $endPass = Dr 'END result=PASS checks=14 failures=0'
 
 # ---------------------------------------------------------------- revive
 $revive = (Start-Log 'revive') + @(
-    (Dr 'OK MARKED mark 3 markers, one waypoint actor each (Crash Site,Satellite,Weather Station)'), (Dr 'OK DRAWN before every marker''s waypoint is painted'),
+    (Dr 'OK MARKED mark 3 waypoints, one waypoint actor each (Crash Site,Satellite,Weather Station)'), (Dr 'OK DRAWN before every waypoint''s waypoint is painted'),
     (M "LOST pawn=$P1 snapshot n=3 (locations 2, satellite 1)"),
     (M "REVIVE pawn=$P2 was=$P1 snapshot=3 onRevive=restore")) + (Restored) + (DriverRestored 'revive1') + @(
     (Dr 'ANSWER journal-same-after-revive=yes'),
@@ -84,13 +84,13 @@ Expect $unacted 'revive' 1 'revive: an AGAIN without RESTORED/CLEARED -> fails' 
 $probe = (Start-Log 'probe') + @(
     (Dr 'MAPOPEN 1 journal=Journal_C_1 mapui=MapUI_C_1 flags=6 dupes=0 constructs+1 first=LevelLocationUI_C_1'),
     (Dr 'ANSWER construct-every-open=yes flags-rebuilt-each-open=no (constructs=4 over 4 opens)'),
-    (Dr 'OK MARKED mark 4 markers, one waypoint actor each (A,B,C,Satellite)'), (Dr 'PAINT before A=120 B=118 C=119 Satellite=120'),
-    (Dr 'OK DRAWN before every marker''s waypoint is painted'),
+    (Dr 'OK MARKED mark 4 waypoints, one waypoint actor each (A,B,C,Satellite)'), (Dr 'PAINT before A=120 B=118 C=119 Satellite=120'),
+    (Dr 'OK DRAWN before every waypoint''s waypoint is painted'),
     (M "LOST pawn=$P1 snapshot n=4 (locations 3, satellite 1)"), (M "DEBUG PAWN back $P1"),
     (Dr 'OK REPRO after RemoveAllWidgets no waypoint is painted (0 painted): the bug, and the paint hook sees it'),
     (Dr 'ANSWER repair rerun-beginplay(B)=not-drawn respawn(C)=drawn respawn(Satellite)=drawn toggle-space(A)=drawn'),
-    (Dr 'OK RESPAWN-DRAWN a respawned waypoint is painted again (Markers'' way)'),
-    (Dr 'OK LIVENESS a waypoint destroyed by its flag is not counted alive (FindAllOf=1, alive=0)'), (Dr 'OK LIVEOK the 4 live markers are all still counted alive (4)'), $endPass)
+    (Dr 'OK RESPAWN-DRAWN a respawned waypoint is painted again (Waypoints'' way)'),
+    (Dr 'OK LIVENESS a waypoint destroyed by its flag is not counted alive (FindAllOf=1, alive=0)'), (Dr 'OK LIVEOK the 4 live waypoints are all still counted alive (4)'), $endPass)
 Expect $probe 'probe' 0 'probe: passes as written' 'All checks passed'
 Expect $probe 'probe' 0 'probe: prints the answers' 'ANSWER repair'
 Expect ($probe + @(M "REVIVE pawn=$P2 was=$P1 snapshot=4 onRevive=restore") + (Restored)) 'probe' 1 'probe: any revive action -> fails' 'REVIVE'
@@ -99,7 +99,7 @@ Expect (Without $probe 'ANSWER construct') 'probe' 1 'probe: no construct answer
 
 # ---------------------------------------------------------------- death
 $death = (Start-Log 'death') + @(
-    (Dr 'OK MARKED mark 3 markers, one waypoint actor each (A,B,Satellite)'), (Dr "KILL death $P1 DeathEvent ok=true "),
+    (Dr 'OK MARKED mark 3 waypoints, one waypoint actor each (A,B,Satellite)'), (Dr "KILL death $P1 DeathEvent ok=true "),
     (M "LOST pawn=$P1 snapshot n=3 (locations 2, satellite 1)"),
     (M 'PAWN /Game/Maps/SmallLoweIsland/SmallMap.SmallMap:PersistentLevel.Spectator_C_1 (Spectator_C) is not a first-person character: not a revive'),
     (Dr 'OK DEAD the player no longer controls its first-person character'), (Dr 'OK KEPT the waypoint actors survive the death (3 of 3)'),
@@ -109,19 +109,19 @@ Expect ($death + @(M "REBOUND pawn=$P2 was=$P1 (x)") + (Restored)) 'death' 1 'de
 Expect (Without $death 'LOST pawn') 'death' 1 'death: no snapshot -> fails' 'LOST'
 
 # ---------------------------------------------------------------- no-core, old-core
-$noCore = @((U "Starting Lua mod 'MarkersDriver'"), (Dr 'SCENARIO no-core'), (U "Starting Lua mod 'Markers'"),
-    (M 'Nucleus is not installed. Markers will not run.'), (Dr 'OK NOMARKERS match1 reached the match; Markers'' one line is judged by check.ps1'), $endPass)
+$noCore = @((U "Starting Lua mod 'WaypointsDriver'"), (Dr 'SCENARIO no-core'), (U "Starting Lua mod 'Waypoints'"),
+    (M 'Nucleus is not installed. Waypoints will not run.'), (Dr 'OK NOWAYPOINTS match1 reached the match; Waypoints'' one line is judged by check.ps1'), $endPass)
 Expect $noCore 'no-core' 0 'no-core: passes as written' 'All checks passed'
-Expect ($noCore + @(M 'READY onRevive=restore')) 'no-core' 1 'no-core: a second Markers line -> fails' '#1'
+Expect ($noCore + @(M 'READY onRevive=restore')) 'no-core' 1 'no-core: a second Waypoints line -> fails' '#1'
 $oldCore = @((U "Starting Lua mod 'Nucleus'"), (Dr 'SCENARIO old-core'), (Dr 'OLDCORE published nucleus.version=0.1.0 (from Nucleus''s installed mod.json)'),
-    (M 'ERROR Nucleus 0.1.0 is not compatible; Markers needs 0.2.0 (^ rules). Update Nucleus. Markers will not run.'),
-    (Dr 'OK NOMARKERS match1 reached the match'), $endPass)
+    (M 'ERROR Nucleus 0.1.0 is older than Waypoints needs (>=0.2.0). Update Nucleus. Waypoints will not run.'),
+    (Dr 'OK NOWAYPOINTS match1 reached the match'), $endPass)
 Expect $oldCore 'old-core' 0 'old-core: passes as written' 'All checks passed'
-Expect ($oldCore -replace 'needs 0\.2\.0', 'needs 0.3.0') 'old-core' 1 'old-core: the need must be dependsOn''s minimum' 'not compatible'
+Expect ($oldCore -replace 'needs \(>=0\.2\.0\)', 'needs (>=0.3.0)') 'old-core' 1 'old-core: the need must be dependsOn''s version' 'is older than'
 
 # ---------------------------------------------------------------- pair
 $victim = (Start-Log 'pair-victim') + @(
-    (Dr 'OK MARKED mark 3 markers, one waypoint actor each (Crash Site,Satellite,Weather Station)'), (Dr 'VICTIM ready marked=Crash Site,Satellite,Weather Station'),
+    (Dr 'OK MARKED mark 3 waypoints, one waypoint actor each (Crash Site,Satellite,Weather Station)'), (Dr 'VICTIM ready marked=Crash Site,Satellite,Weather Station'),
     (M "LOST pawn=$P1 snapshot n=3 (locations 2, satellite 1)"), (M "REVIVE pawn=$P2 was=$P1 snapshot=3 onRevive=restore")) + (Restored) + (DriverRestored 'revive') + @($endPass)
 Expect $victim 'pair-victim' 0 'pair-victim: passes as written' 'All checks passed'
 Expect (Without $victim 'OK DRAWN revive') 'pair-victim' 1 'pair-victim: not drawn after the revive -> fails' 'DRAWN'

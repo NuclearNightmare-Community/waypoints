@@ -1,9 +1,9 @@
--- Load test for the test driver (test/MarkersDriver/Scripts/main.lua) outside the game: for every scenario it loads,
+-- Load test for the test driver (test/WaypointsDriver/Scripts/main.lua) outside the game: for every scenario it loads,
 -- builds its steps, registers one 250 ms game-thread loop and runs a few ticks against an empty fake world (no player
 -- controller yet) without a step throwing. The scenarios themselves only run in game (run.ps1, pair.ps1).
 -- Run from the repo root:  texlua test/unit/driver_test.lua
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
-local DIR = ROOT .. "/test/MarkersDriver/Scripts"
+local DIR = ROOT .. "/test/WaypointsDriver/Scripts"
 local MAIN = DIR .. "/main.lua"
 package.path = ROOT .. "/test/unit/?.lua;" .. package.path
 local H = require("fakeue").harness("driver_test")
@@ -31,8 +31,8 @@ for _, sc in ipairs({ "probe", "revive", "death", "no-core", "old-core", "pair-v
     ok(okL, sc .. ": loads", err)
     local loaded, scen
     for _, l in ipairs(printed) do
-        if l:find("^%[MarkersDriver%] LOADED %d+ steps$") then loaded = l end
-        if l == "[MarkersDriver] SCENARIO " .. sc then scen = l end
+        if l:find("^%[WaypointsDriver%] LOADED %d+ steps$") then loaded = l end
+        if l == "[WaypointsDriver] SCENARIO " .. sc then scen = l end
     end
     ok(scen ~= nil, sc .. ": logs its scenario")
     ok(loaded ~= nil and tonumber(loaded:match("(%d+) steps")) > 3, sc .. ": builds steps", loaded)

@@ -1,39 +1,39 @@
--- MarkersDriver: Markers' test driver. Installed only by deploy.ps1 -Test, never shipped; Markers itself carries no
--- test code. Plain UE4SS Lua: it doesn't connect to core (no-core runs without it), and it can't reach Markers' Lua
--- state, so it judges Markers by the world: the waypoint actors (their Name, Character, bReplicates), the map's flags
+-- WaypointsDriver: Waypoints' test driver. Installed only by deploy.ps1 -Test, never shipped; Waypoints itself carries no
+-- test code. Plain UE4SS Lua: it doesn't connect to core (no-core runs without it), and it can't reach Waypoints' Lua
+-- state, so it judges Waypoints by the world: the waypoint actors (their Name, Character, bReplicates), the map's flags
 -- (Selected), and whether each on-screen waypoint is painted (a hook on its widget's text binding, which Slate calls
--- only while the widget is drawn). It loads Markers' own game.lua (Mods/Markers/Scripts) for the probe's respawn, so
+-- only while the widget is drawn). It loads Waypoints' own game.lua (Mods/Waypoints/Scripts) for the probe's respawn, so
 -- the probe exercises the mod's real spawn path.
 --
--- mods.txt order (deploy.ps1): <Core>, MarkersDriver, Markers.
+-- mods.txt order (deploy.ps1): <Core>, WaypointsDriver, Waypoints.
 -- Scenarios (Scripts/scenario.txt, written by deploy.ps1):
 --   probe:   story 2's first in-game checks, solo host. (1) Does MapUI_C's Construct run on every map open? (opens and
 --            closes the Journal from Lua three times, hooking MapUI_C:Construct, logging the flag widgets' paths).
 --            (2) The bug: three location flags and the satellite clicked through their own handlers are painted;
 --            RemoveAllWidgets (what death and the radio revive call) stops the painting. (3) Which repair paints again:
 --            toggling the WidgetComponent's space, re-running the actor's BeginPlay (a new widget), or respawning the
---            actor (Markers' way). (4) Liveness: a waypoint the flag destroyed is still returned by FindAllOf until GC,
+--            actor (Waypoints' way). (4) Liveness: a waypoint the flag destroyed is still returned by FindAllOf until GC,
 --            and game.alive() tells it apart.
 --   revive:  a revive through the game's own code, solo host: the local character is queued (game state
 --            UpdateRespawnQue) and the radio's ReinforceSpecficPlayer spawns and possesses a new character exactly as a
 --            reinforcement does (RPCReinforcementMethod2 on this machine: RemoveAllWidgets, Possess, new HUD).
---            Revive 1 with onRevive=restore: one actor per marker, bound to the new pawn, painted, bReplicates false,
---            the flags match; same Journal instance? Then the driver rewrites Markers' settings.lua to onRevive=clear
+--            Revive 1 with onRevive=restore: one actor per waypoint, bound to the new pawn, painted, bReplicates false,
+--            the flags match; same Journal instance? Then the driver rewrites Waypoints' settings.lua to onRevive=clear
 --            (read at every revive) and revive 2: no waypoint, no flag selected.
---   death:   solo host: markers up, then the player dies (DeathEvent() on itself): spectator,
---            the waypoints keep existing, Markers takes its snapshot and does nothing else.
---   no-core, old-core: in a match: nothing from Markers (check.ps1 judges its one line).
+--   death:   solo host: waypoints up, then the player dies (DeathEvent() on itself): spectator,
+--            the waypoints keep existing, Waypoints takes its snapshot and does nothing else.
+--   no-core, old-core: in a match: nothing from Waypoints (check.ps1 judges its one line).
 --   pair-victim:     (B, a client in the VM) marks, dies on the host's signal (kill.txt: DeathEvent() on its own
 --                    pawn), is revived by the host's radio; then the revive 1 checks on the client.
---   pair-host:       (A, the host, Markers not needed) once B is in the match: waits, signals B's kill, waits for
+--   pair-host:       (A, the host, Waypoints not needed) once B is in the match: waits, signals B's kill, waits for
 --                    B's death, calls the radio's Reinformant (the computer's "call reinforcement"), waits for B's new
 --                    character.
 --   pair-hostvictim: (A, the host, modded) marks, dies, calls the radio's Reinformant itself, then the revive checks.
 -- Keys it can't press itself (Enter for touchdown) go to run.ps1 through request.txt / done.txt next to this file.
 -- Never keeps a UObject across steps: only paths and names, re-found each step.
 local CORE = "Nucleus"
-local MARKERS = "Markers"
-local ME = "MarkersDriver"
+local WAYPOINTS = "Waypoints"
+local ME = "WaypointsDriver"
 local scriptDir = debug.getinfo(1, "S").source:gsub("^@", ""):match("^(.*)[/\\]")
 local modsDir = scriptDir:match("^(.*)[/\\][^/\\]+[/\\][Ss]cripts$") or "."
 
@@ -45,7 +45,7 @@ do
     if f then SCENARIO = (f:read("*a") or ""):match("^%s*([%w%-]+)") or SCENARIO; f:close() end
 end
 say("SCENARIO %s", SCENARIO)
--- pair-victim's kill signal (written into this folder by pair.ps1 through markers-scenarios.ps1); never a stale one.
+-- pair-victim's kill signal (written into this folder by pair.ps1 through waypoints-scenarios.ps1); never a stale one.
 local KILL_SIGNAL = scriptDir .. "\\kill.txt"
 os.remove(KILL_SIGNAL)
 
@@ -92,10 +92,10 @@ end
 local function GS() return StaticFindObject("/Script/Engine.Default__GameplayStatics") end
 local function WLL() return StaticFindObject("/Script/UMG.Default__WidgetLayoutLibrary") end
 
--- Markers' own adapter (the respawn the mod does), loaded from the installed mod; nil without it (no-core).
+-- Waypoints' own adapter (the respawn the mod does), loaded from the installed mod; nil without it (no-core).
 local G
 do
-    local chunk = loadfile(modsDir .. "\\" .. MARKERS .. "\\Scripts\\game.lua")
+    local chunk = loadfile(modsDir .. "\\" .. WAYPOINTS .. "\\Scripts\\game.lua")
     if chunk then local ok, m = pcall(chunk) if ok then G = m end end
 end
 
@@ -129,7 +129,7 @@ local function liveHud()
     return nil
 end
 
--- ---------------------------------------------------------------- markers in the world
+-- ---------------------------------------------------------------- waypoints in the world
 local function alive(a) if G then return G.alive(a) end return valid(a) end
 -- { name -> { n = count, path, character = path, replicates } } of the live waypoint actors of this world.
 local function waypoints()
@@ -258,12 +258,12 @@ local function paintWindow(phase, sec, store)
     end
 end
 
--- A screen-space waypoint is painted only while its location is in view (the first probe run: a marker behind the
--- camera had no paints). So each marker is checked on its own: the camera is turned to it (the local controller's
+-- A screen-space waypoint is painted only while its location is in view (the first probe run: a waypoint behind the
+-- camera had no paints). So each waypoint is checked on its own: the camera is turned to it (the local controller's
 -- SetControlRotation), then its paints are counted. Logs "PAINT <phase> name=n ..." and stores { name = n }.
 -- The aim is re-applied on every tick and what the camera really shows is checked (the camera manager's rotation, the
--- angle to the marker): a window counts only if the marker stayed in view the whole time. A window where it didn't is
--- retried (AIMTRIES); a marker never held in view gets 0 (DRAWN fails, and the AIM lines say why).
+-- angle to the waypoint): a window counts only if the waypoint stayed in view the whole time. A window where it didn't is
+-- retried (AIMTRIES); a waypoint never held in view gets 0 (DRAWN fails, and the AIM lines say why).
 local INVIEW_DEG, AIMTRIES = 10, 4
 local function aimAt(loc)
     local c = pc()
@@ -341,7 +341,7 @@ local function paintEach(phase, store, settle, window)
                 end
             end
             return false
-        end, #names * AIMTRIES * (settle + window + 1) + 10, phase .. " paint per marker"
+        end, #names * AIMTRIES * (settle + window + 1) + 10, phase .. " paint per waypoint"
     end
 end
 
@@ -431,7 +431,7 @@ local function enterMatch(phase)
 end
 
 -- Opens the map, clicks n location flags and the satellite flag through their own handlers, closes it; checks one
--- waypoint actor per clicked marker.
+-- waypoint actor per clicked waypoint.
 local function mark(phase, n)
     step(phase .. ": open map", function() openMap(phase) return after(2), 5, "map open" end)
     step(phase .. ": click", function()
@@ -460,7 +460,7 @@ local function mark(phase, n)
         say("WAYPOINTS %s total=%d %s", phase, total, describe(wp))
         local one = #S.marked == n + 1
         for _, name in ipairs(S.marked) do one = one and wp[name] ~= nil and wp[name].n == 1 end
-        check(one and total == #S.marked, "MARKED %s %d markers, one waypoint actor each (%s)", phase, #S.marked, table.concat(S.marked, ","))
+        check(one and total == #S.marked, "MARKED %s %d waypoints, one waypoint actor each (%s)", phase, #S.marked, table.concat(S.marked, ","))
         paintHook()
     end)
 end
@@ -470,11 +470,11 @@ local function drawnAll(phase, store)
         local p = S[store] or {}
         local miss = {}
         for _, name in ipairs(S.marked) do if not ((p[name] or 0) > 0) then miss[#miss + 1] = name end end
-        check(#miss == 0, "DRAWN %s every marker's waypoint is painted%s", phase, #miss > 0 and (" (not: " .. table.concat(miss, ",") .. ")") or "")
+        check(#miss == 0, "DRAWN %s every waypoint's waypoint is painted%s", phase, #miss > 0 and (" (not: " .. table.concat(miss, ",") .. ")") or "")
     end)
 end
 
--- After a revive (the pawn changed): wait until every marked waypoint is bound to the new pawn (Markers restored it),
+-- After a revive (the pawn changed): wait until every marked waypoint is bound to the new pawn (Waypoints restored it),
 -- or until none is left (cleared), then check.
 local function waitPawnChange(phase, timeout)
     step(phase .. ": new pawn", function()
@@ -502,7 +502,7 @@ local function restoredChecks(phase)
             end
             say("RESTORE-SEEN %s after %.1f s", phase, os.clock() - t0)
             return true
-        end, 20, phase .. " markers bound to the new pawn"
+        end, 20, phase .. " waypoints bound to the new pawn"
     end)
     step(phase .. ": restored", function()
         local wp, total = waypoints()
@@ -514,7 +514,7 @@ local function restoredChecks(phase)
             if name ~= "Satellite" then bound = bound and e ~= nil and e.character == S.pawnPath end
             rep = rep and e ~= nil and e.replicates == false
         end
-        check(one, "ONE %s exactly one waypoint actor per marker (%d markers, %d actors)", phase, #S.marked, total)
+        check(one, "ONE %s exactly one waypoint actor per waypoint (%d waypoints, %d actors)", phase, #S.marked, total)
         check(bound, "BOUND %s every location waypoint's Character is the new pawn", phase)
         check(rep, "LOCAL %s every waypoint actor has bReplicates=false", phase)
     end)
@@ -553,7 +553,7 @@ end
 -- queueing it as a death would (game state UpdateRespawnQue).
 local function syntheticRevive(phase)
     -- The death a real revive follows: death calls RemoveAllWidgets, and the player has no HUD for a while (core sees
-    -- `lost`). Without it, core could see the old HUD replaced by the new one in one poll (no `lost`), which Markers
+    -- `lost`). Without it, core could see the old HUD replaced by the new one in one poll (no `lost`), which Waypoints
     -- rightly treats as a rebound (no proven death), not a revive.
     step(phase .. ": death's RemoveAllWidgets", function()
         local okR = pcall(function() WLL():RemoveAllWidgets(pc()) end)
@@ -575,12 +575,12 @@ end
 
 local function setOnRevive(value)
     step("set onRevive=" .. value, function()
-        local path = modsDir .. "\\" .. MARKERS .. "\\Scripts\\settings.lua"
+        local path = modsDir .. "\\" .. WAYPOINTS .. "\\Scripts\\settings.lua"
         local f = io.open(path, "w")
         if not f then check(false, "SETTINGS could not write %s", path) return end
-        f:write('-- Rewritten by MarkersDriver (test only).\nreturn { onRevive = "' .. value .. '", debug = true }\n')
+        f:write('-- Rewritten by WaypointsDriver (test only).\nreturn { onRevive = "' .. value .. '", debug = true }\n')
         f:close()
-        say("SETTINGS onRevive=%s written to Markers' settings.lua", value)
+        say("SETTINGS onRevive=%s written to Waypoints' settings.lua", value)
     end)
 end
 
@@ -671,7 +671,7 @@ local function buildProbe()
         local n = 0 for _, c in pairs(S.paintRemoved or {}) do if c > 0 then n = n + 1 end end
         check(n == 0, "REPRO after RemoveAllWidgets no waypoint is painted (%d painted): the bug, and the paint hook sees it", n)
     end)
-    -- (3) repairs, one per marker
+    -- (3) repairs, one per waypoint
     step("repairs", function()
         local wp = {}
         for _, short in ipairs({ "LevelWaypointActor_C", "SatelliteWaypoint_C" }) do
@@ -693,7 +693,7 @@ local function buildProbe()
         try(names[2], "rerun-beginplay", function(a) a:ReceiveBeginPlay() end)
         local p = myPawn()
         local function respawn(a)
-            if not G then error("Markers' game.lua not loaded") end
+            if not G then error("Waypoints' game.lua not loaded") end
             local kind = classOf(a) == "SatelliteWaypoint_C" and "satellite" or "location"
             local v = a:K2_GetActorLocation()
             local n, info = G.spawn({ kind = kind, name = kind == "satellite" and "Satellite" or text(a.Name), loc = { X = v.X, Y = v.Y, Z = v.Z } }, p, a)
@@ -715,7 +715,7 @@ local function buildProbe()
         say("ANSWER repair %s", table.concat(t, " "))
         local okResp = true
         for name, method in pairs(S.method or {}) do if method == "respawn" and not (((S.paintRepaired or {})[name] or 0) > 0) then okResp = false end end
-        check(okResp, "RESPAWN-DRAWN a respawned waypoint is painted again (Markers' way)")
+        check(okResp, "RESPAWN-DRAWN a respawned waypoint is painted again (Waypoints' way)")
     end)
     -- (4) liveness of destroyed actors
     step("liveness", function()
@@ -750,7 +750,7 @@ local function buildProbe()
         say("LIVENESS '%s' FindAllOf=%d alive=%d", tostring(name), seen, live)
         check(live == 0, "LIVENESS a waypoint destroyed by its flag is not counted alive (FindAllOf=%d, alive=%d)", seen, live)
         local _, total = waypoints()
-        check(total == #S.marked, "LIVEOK the %d live markers are all still counted alive (%d)", #S.marked, total)
+        check(total == #S.marked, "LIVEOK the %d live waypoints are all still counted alive (%d)", #S.marked, total)
     end)
 end
 
@@ -786,15 +786,15 @@ local function buildDeath()
     end)
 end
 
-local function buildNoMarkers()
+local function buildNoWaypoints()
     enterMatch("match1")
     wait("watch", 10)
-    step("no markers activity", function()
-        check(true, "NOMARKERS match1 reached the match; Markers' one line is judged by check.ps1")
+    step("no waypoints activity", function()
+        check(true, "NOWAYPOINTS match1 reached the match; Waypoints' one line is judged by check.ps1")
     end)
 end
 
--- Pair roles (tools/vm/pair.ps1 scenarios in test/pair/markers-scenarios.ps1). The lobby and the match come from
+-- Pair roles (tools/vm/pair.ps1 scenarios in test/pair/waypoints-scenarios.ps1). The lobby and the match come from
 -- PairDriver on the host; the victim only waits for them.
 local function waitMatch(phase, timeout)
     step(phase .. ": match", function()
@@ -928,7 +928,7 @@ local function tick()
     busy = false
 end
 
-local build = ({ probe = buildProbe, revive = buildRevive, death = buildDeath, ["no-core"] = buildNoMarkers, ["old-core"] = buildNoMarkers,
+local build = ({ probe = buildProbe, revive = buildRevive, death = buildDeath, ["no-core"] = buildNoWaypoints, ["old-core"] = buildNoWaypoints,
                  ["pair-victim"] = buildPairVictim, ["pair-host"] = buildPairHost, ["pair-hostvictim"] = buildPairHostVictim })[SCENARIO]
 if not build then
     say("END result=FAIL checks=0 failures=1 reason=unknown-scenario %s", SCENARIO)

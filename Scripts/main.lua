@@ -1,11 +1,11 @@
--- Markers 0.1.0 (spec-markers-v1, story 2): after a revive, the map markers the player had up show their on-screen
--- waypoints again (onRevive = restore, the default), or every marker is cleared (onRevive = clear).
+-- Waypoints 0.1.0 (spec-markers-v1, story 2): after a revive, the map waypoints the player had up show their on-screen
+-- waypoints again (onRevive = restore, the default), or every waypoint is cleared (onRevive = clear).
 -- Runs on Nucleus (core) through the dependent bootstrap (core's api-contract.md) and uses only core's public API:
 -- connect, core.log, core.ui.hud.watch (HUD events), core.ref/deref/free (weak handles), core.clock.micros.
 -- Local only (scope client): the waypoint actors are local and unreplicated; no RPC, no chat, no replicated actor, and
 -- nothing read from another player. Holds no UObject between callbacks (AGENTS.md): revive.lua sees plain facts, the
 -- deferred action re-finds the new pawn through a weak handle. No per-tick work: it acts on HUD events only.
-local CORE, NEED, ME = "Nucleus", "0.2.0", "Markers"
+local CORE, NEED, ME = "Nucleus", ">=0.2.0", "Waypoints"
 local DELAY_MS = 500 -- after the revive's HUD event, so the game has finished possessing the new pawn
 local SNAPSHOT_MS = 50 -- the snapshot at the death runs this much later, outside core's HUD tick (it costs about 2 ms)
 
@@ -19,13 +19,13 @@ local ok, client = pcall(require, CORE:lower() .. ".client")
 if not ok then print(("[%s] %s is not installed. %s will not run.\n"):format(ME, CORE, ME)) return end
 
 local revive = require("revive")
-local markers = require("markers")
+local waypoints = require("waypoints")
 local game = require("game")
 
 -- ---------------------------------------------------------------- settings
 -- deploy.ps1 generates Scripts/settings.lua from mod.json (onRevive: restore | clear). Until core's settings service
 -- exists the mod reads it there; it is read again at every revive, so a changed onRevive takes effect at the next one
--- (changeable "anytime"). Problems are only remembered here and logged once connected (one [Markers] line without core).
+-- (changeable "anytime"). Problems are only remembered here and logged once connected (one [Waypoints] line without core).
 local VALUES = { restore = true, clear = true }
 local function loadSettings()
     local s = { onRevive = "restore", debug = false }
@@ -67,10 +67,10 @@ local function start(core)
         end
         local world = game.worldOf(pawn)
         if action == "clear" then
-            local r = markers.clear(game, pawn, world, log)
+            local r = waypoints.clear(game, pawn, world, log)
             if r then log.info("CLEARED n=%d (failed %d) flags=%d satelliteFlags=%d", r.cleared, r.failed, r.flags, r.satFlags) end
         else
-            local r = markers.restore(game, pawn, world, snapshot, log)
+            local r = waypoints.restore(game, pawn, world, snapshot, log)
             if r then
                 log.info("RESTORED n=%d (from actors %d, from the snapshot %d, failed %d, old destroyed %d) flags=%d satelliteFlags=%d",
                     r.respawned, r.fromActors, r.fromSnapshot, r.failed, r.destroyed, r.flags, r.satFlags)
@@ -116,8 +116,8 @@ local function start(core)
             local world, pawn = R.world, d.pawn
             local function take()
                 local okT, err = pcall(function()
-                    for _, e in ipairs(markers.snapshot(game, world, log) or {}) do snap[#snap + 1] = e end
-                    local l, s = markers.counts(snap)
+                    for _, e in ipairs(waypoints.snapshot(game, world, log) or {}) do snap[#snap + 1] = e end
+                    local l, s = waypoints.counts(snap)
                     log.info("LOST pawn=%s snapshot n=%d (locations %d, satellite %d)", pawn, l + s, l, s)
                 end)
                 if not okT then log.error("snapshot failed: %s", tostring(err)) end
@@ -137,7 +137,7 @@ local function start(core)
         elseif d.kind == "same" or d.kind == "back" then
             log.debug("PAWN %s %s", d.kind, d.pawn)
         elseif d.kind == "revive" then
-            local l, s = markers.counts(d.snapshot)
+            local l, s = waypoints.counts(d.snapshot)
             log.info("REVIVE pawn=%s was=%s snapshot=%d onRevive=%s", d.pawn, d.was, l + s, (loadSettings()).onRevive)
             schedule(d.action, f.pawn, d.pawn, d.snapshot)
         elseif d.kind == "rebound" then
@@ -165,6 +165,6 @@ client.connect{
         local okR, err = pcall(start, core)
         if not okR then print(("[%s] ERROR start failed: %s\n"):format(ME, tostring(err))) end
     end,
-    -- connect has already logged the one line naming the cause (CAP-4: exactly one [Markers] line). Nothing to add.
+    -- connect has already logged the one line naming the cause (CAP-4: exactly one [Waypoints] line). Nothing to add.
     onFail = function() end,
 }

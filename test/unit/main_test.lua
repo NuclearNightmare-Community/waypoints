@@ -1,5 +1,5 @@
 -- Unit tests for Scripts/main.lua outside the game: the bootstrap, the settings (onRevive both ways, changed between
--- revives), and the whole path from core's HUD events to the restore or clear, with the real revive.lua, markers.lua
+-- revives), and the whole path from core's HUD events to the restore or clear, with the real revive.lua, waypoints.lua
 -- and game.lua over a fake core (connect, log, ui.hud.watch, ref/deref/free, clock) and a fake UE4SS world.
 -- Run from the repo root:  texlua test/unit/main_test.lua
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
@@ -28,7 +28,7 @@ local function boot(opts)
     F.install(W)
     S = { settings = opts.settings, connects = {} }
     if S.settings == nil then S.settings = 'return { onRevive = "restore" }' end
-    for _, m in ipairs({ "revive", "markers", "game", "nucleus.client" }) do package.loaded[m] = nil end
+    for _, m in ipairs({ "revive", "waypoints", "game", "nucleus.client" }) do package.loaded[m] = nil end
     package.preload["nucleus.client"] = nil
     if opts.client ~= false then
         package.preload["nucleus.client"] = function() return { connect = function(o) S.connects[#S.connects + 1] = o end } end
@@ -47,7 +47,7 @@ end
 
 local function newCore(o)
     o = o or {}
-    local core = { name = "Nucleus", version = "0.2.0", log = newLog("Markers"), watchers = {} }
+    local core = { name = "Nucleus", version = "0.2.0", log = newLog("Waypoints"), watchers = {} }
     if o.hud ~= false then
         core.ui = { hud = { watch = function(fn) core.watchers[#core.watchers + 1] = fn return #core.watchers end } }
     end
@@ -68,7 +68,7 @@ local function emit(core, hud, event) for _, fn in ipairs(core.watchers) do fn(h
 local function lines(pat) local r = {} for _, l in ipairs(W.printed) do if l:find(pat) then r[#r + 1] = l end end return r end
 local function count(pat) return #lines(pat) end
 
--- A match: the player's pawn with a HUD, two location markers and the satellite up, their flags.
+-- A match: the player's pawn with a HUD, two location waypoints and the satellite up, their flags.
 local function match(core)
     W.p1 = W.pawn(1)
     W.hud1 = W.hud(W.p1)
@@ -103,23 +103,23 @@ end
 do
     boot{ client = false }
     eq(#W.printed, 1, "no core: exactly one line")
-    eq(W.printed[1], "[Markers] Nucleus is not installed. Markers will not run.", "no core: the line names the cause")
+    eq(W.printed[1], "[Waypoints] Nucleus is not installed. Waypoints will not run.", "no core: the line names the cause")
     eq(#S.connects, 0, "no core: no connect")
 end
 do
     boot()
     eq(#S.connects, 1, "connect called once")
     local c = S.connects[1]
-    ok(c.mod == "Markers" and c.need == "0.2.0", "connect{ mod = 'Markers', need = '0.2.0' }", tostring(c.mod) .. " " .. tostring(c.need))
+    ok(c.mod == "Waypoints" and c.need == ">=0.2.0", "connect{ mod = 'Waypoints', need = '>=0.2.0' }", tostring(c.mod) .. " " .. tostring(c.need))
     eq(#W.printed, 0, "nothing printed during main.lua")
-    c.onFail("Nucleus 0.1.0 is not compatible; Markers needs 0.2.0 (^ rules). Update Nucleus.")
+    c.onFail("Nucleus 0.1.0 is older than Waypoints needs (>=0.2.0). Update Nucleus.")
     eq(#W.printed, 0, "onFail adds no line (connect logged the cause)")
 end
 do -- core without HUD events: one ERROR, nothing registered.
     boot()
     local core = newCore{ hud = false }
     ready(core)
-    eq(count("^%[Markers%] ERROR Nucleus's HUD events"), 1, "no core.ui.hud: one ERROR")
+    eq(count("^%[Waypoints%] ERROR Nucleus's HUD events"), 1, "no core.ui.hud: one ERROR")
     eq(#W.loadMapHooks, 0, "no core.ui.hud: no hook")
 end
 
@@ -128,33 +128,33 @@ do
     boot()
     local core = newCore()
     ready(core)
-    eq(count("^%[Markers%] READY onRevive=restore$"), 1, "READY onRevive=restore")
+    eq(count("^%[Waypoints%] READY onRevive=restore$"), 1, "READY onRevive=restore")
     eq(#core.watchers, 1, "one HUD watcher")
     eq(#W.loadMapHooks, 1, "one LoadMap hook")
     match(core)
-    eq(count("^%[Markers%] PAWN first .*BP_FirstPersonCharacter_C_1$"), 1, "PAWN first")
+    eq(count("^%[Waypoints%] PAWN first .*BP_FirstPersonCharacter_C_1$"), 1, "PAWN first")
     dieAndRevive(core)
-    eq(count("^%[Markers%] LOST pawn=.*_1 snapshot n=3 %(locations 2, satellite 1%)$"), 1, "LOST with the snapshot at the death")
-    eq(count("^%[Markers%] REVIVE pawn=.*_2 was=.*_1 snapshot=3 onRevive=restore$"), 1, "REVIVE line")
+    eq(count("^%[Waypoints%] LOST pawn=.*_1 snapshot n=3 %(locations 2, satellite 1%)$"), 1, "LOST with the snapshot at the death")
+    eq(count("^%[Waypoints%] REVIVE pawn=.*_2 was=.*_1 snapshot=3 onRevive=restore$"), 1, "REVIVE line")
     eq(#W.delayed, 1, "the restore is deferred (ExecuteInGameThreadWithDelay)")
     eq(W.delayed[1].ms, 500, "deferred by 500 ms")
     eq(#W.spawns, 0, "nothing spawned inside core's HUD tick")
     W.runDelayed()
-    eq(count("^%[Markers%] RESTORED n=3 %(from actors 3, from the snapshot 0, failed 0, old destroyed 3%) flags=3 satelliteFlags=1$"), 1, "RESTORED line")
+    eq(count("^%[Waypoints%] RESTORED n=3 %(from actors 3, from the snapshot 0, failed 0, old destroyed 3%) flags=3 satelliteFlags=1$"), 1, "RESTORED line")
     local live = liveWaypoints()
-    eq(#live, 3, "one waypoint actor per marker")
+    eq(#live, 3, "one waypoint actor per waypoint")
     local bound = true
     for _, a in ipairs(live) do if a._class.short == "LevelWaypointActor_C" and a.Character ~= W.p2 then bound = false end end
     ok(bound, "location waypoints bound to the new pawn")
-    ok(W.fMed.Selected and W.fAir.Selected and W.fSat.Selected and not W.fRig.Selected, "flags match the markers")
+    ok(W.fMed.Selected and W.fAir.Selected and W.fSat.Selected and not W.fRig.Selected, "flags match the waypoints")
     eq(count("bReplicates=false"), 3, "each RESTORE logs bReplicates=false")
     eq(count("WARN"), 0, "no WARN")
     eq(next(core.refs), nil, "the pawn's weak handle was freed")
     -- the new pawn's HUD rebuilt within the settle window: restored again (still one actor each)
     emit(core, nil, "lost"); core.advance(3); emit(core, W.hud2, "attached")
-    eq(count("^%[Markers%] AGAIN pawn="), 1, "AGAIN within the settle window")
+    eq(count("^%[Waypoints%] AGAIN pawn="), 1, "AGAIN within the settle window")
     W.runDelayed()
-    eq(#liveWaypoints(), 3, "AGAIN: still exactly one actor per marker")
+    eq(#liveWaypoints(), 3, "AGAIN: still exactly one actor per waypoint")
 end
 
 -- ---------------------------------------------------------------- onRevive = clear, and changed between revives
@@ -166,10 +166,10 @@ do
     match(core)
     dieAndRevive(core)
     W.runDelayed()
-    eq(count("^%[Markers%] CLEARED n=3 %(failed 0%) flags=3 satelliteFlags=1$"), 1, "CLEARED line")
+    eq(count("^%[Waypoints%] CLEARED n=3 %(failed 0%) flags=3 satelliteFlags=1$"), 1, "CLEARED line")
     eq(#liveWaypoints(), 0, "clear: no waypoint left")
     ok(not W.fMed.Selected and not W.fAir.Selected and not W.fSat.Selected, "clear: no flag selected")
-    -- changeable anytime: switch to restore, place a marker, die and revive again
+    -- changeable anytime: switch to restore, place a waypoint, die and revive again
     S.settings = 'return { onRevive = "restore" }'
     W.waypoint("location", "Medbay", { X = 1, Y = 2, Z = 3 }, W.p2)
     emit(core, nil, "lost")
@@ -189,8 +189,8 @@ do -- The revive comes before the deferred snapshot ran: the restore still gets 
     eq(#W.delayed, 2, "snapshot and restore both queued")
     eq(W.delayed[1].ms, 50, "the snapshot runs first")
     W.runDelayed()
-    eq(count("^%[Markers%] LOST pawn=.*_1 snapshot n=3 "), 1, "LOST with the snapshot")
-    eq(count("^%[Markers%] RESTORED n=3 "), 1, "RESTORED n=3")
+    eq(count("^%[Waypoints%] LOST pawn=.*_1 snapshot n=3 "), 1, "LOST with the snapshot")
+    eq(count("^%[Waypoints%] RESTORED n=3 "), 1, "RESTORED n=3")
 end
 
 do -- The waypoint actors can't be read at the death: an empty snapshot, the revive still restores from the live actors.
@@ -217,7 +217,7 @@ do -- A new pawn without a HUD loss (no proven death): REBOUND, restored even wi
     local p2 = W.pawn(2)
     emit(core, W.hud(p2), "attached")
     W.runDelayed()
-    eq(count("^%[Markers%] REBOUND pawn=.*_2 was=.*_1"), 1, "REBOUND line")
+    eq(count("^%[Waypoints%] REBOUND pawn=.*_2 was=.*_1"), 1, "REBOUND line")
     eq(count("RESTORED n=3"), 1, "REBOUND restores")
     eq(count("CLEARED"), 0, "REBOUND never clears")
 end
@@ -233,7 +233,7 @@ do -- Death to spectator, no revive: nothing done; a map change forgets everythi
     emit(core, W.hud(nil, spec), "attached")
     eq(count("PAWN .*Spectator_C_1 %(Spectator_C%) is not a first%-person character: not a revive"), 1, "spectator: not a revive")
     eq(#W.delayed, 0, "spectator: nothing scheduled")
-    eq(#liveWaypoints(), 3, "spectator: markers untouched")
+    eq(#liveWaypoints(), 3, "spectator: waypoints untouched")
     W.loadMapHooks[1]()
     emit(core, W.hud(W.pawn(7)), "attached")
     eq(count("REVIVE"), 0, "after a map load: no revive")
@@ -286,7 +286,7 @@ do -- A watcher fault (a HUD whose reads all throw) is caught and logged once; L
     ready(core)
     local bad = setmetatable({}, { __index = function() error("boom") end })
     emit(core, bad, "attached"); emit(core, bad, "attached")
-    eq(count("^%[Markers%] ERROR") + count("traceback"), 0, "bad HUD: no error line")
+    eq(count("^%[Waypoints%] ERROR") + count("traceback"), 0, "bad HUD: no error line")
     ok(count("WARN HUD event failed") <= 1, "bad HUD: at most one WARN")
     emit(core, nil, "shown"); emit(core, nil, "hidden")
     eq(count("REVIVE"), 0, "shown/hidden: nothing")

@@ -1,4 +1,4 @@
--- markers.lua: what a revive does to the markers (markers spec CAP-1). Pure logic over an adapter G (game.lua in the
+-- waypoints.lua: what a revive does to the waypoints (markers spec CAP-1). Pure logic over an adapter G (game.lua in the
 -- game, a fake in the unit tests), so every decision here is tested outside the game:
 --   G.waypoints(world) -> { { kind = "location"|"satellite", name, loc = { X, Y, Z }, obj }, ... }: the live waypoint
 --                         actors of that world (LevelWaypointActor_C, SatelliteWaypoint_C)
@@ -6,7 +6,7 @@
 --                         the flag's own click spawns it; template is an old actor of the same kind (for its class) or nil
 --   G.destroy(obj)
 --   G.syncFlags(pawn, present, newByKey) -> nLocationFlags, nSatelliteFlags: every flag's Selected = present[key]
--- Truth is the actor (SPEC): a marker is up exactly when a waypoint actor with its Name exists. Each call is protected:
+-- Truth is the actor (SPEC): a waypoint is up exactly when a waypoint actor with its Name exists. Each call is protected:
 -- a failure is logged once with its context and leaves the game's own state as it was.
 local M = {}
 
@@ -36,7 +36,7 @@ function M.group(records)
     return list, byKey
 end
 
--- The markers up now, as plain data (no UObjects): { { kind, name, key, loc }, ... }, or nil when they can't be read.
+-- The waypoints up now, as plain data (no UObjects): { { kind, name, key, loc }, ... }, or nil when they can't be read.
 function M.snapshot(G, world, log)
     local ok, recs = pcall(G.waypoints, world)
     if not ok then
@@ -51,7 +51,7 @@ function M.snapshot(G, world, log)
     return out
 end
 
--- What a restore brings back: every marker with a live actor (the truth), plus every marker of the snapshot taken at
+-- What a restore brings back: every waypoint with a live actor (the truth), plus every waypoint of the snapshot taken at
 -- the death that has none any more (source "snapshot": respawned where it was). Nothing else.
 function M.plan(groups, snapshot)
     local entries, seen = {}, {}
@@ -76,9 +76,9 @@ local function counts(snapshot)
 end
 M.counts = counts
 
--- Restore (onRevive = restore): every marker that was up gets a fresh waypoint actor bound to the new pawn, spawned
+-- Restore (onRevive = restore): every waypoint that was up gets a fresh waypoint actor bound to the new pawn, spawned
 -- the way its flag's click spawns one; only once the new one exists is the old one destroyed, so a failed spawn leaves
--- the marker exactly as the game left it. Duplicates of one name collapse into one actor. Then every flag's Selected
+-- the waypoint exactly as the game left it. Duplicates of one name collapse into one actor. Then every flag's Selected
 -- is set from what is up. Returns { respawned, fromActors, fromSnapshot, failed, destroyed, flags, satFlags } or nil.
 function M.restore(G, pawn, world, snapshot, log)
     local ok, recs = pcall(G.waypoints, world)
@@ -115,7 +115,7 @@ function M.restore(G, pawn, world, snapshot, log)
 end
 
 -- Clear (onRevive = clear): every waypoint actor is destroyed and every flag deselected. A failed destroy leaves that
--- marker up, and its flag selected. Returns { cleared, failed, flags, satFlags } or nil.
+-- waypoint up, and its flag selected. Returns { cleared, failed, flags, satFlags } or nil.
 function M.clear(G, pawn, world, log)
     local ok, recs = pcall(G.waypoints, world)
     if not ok then log.warn("clear: could not read the waypoint actors (%s); nothing done", tostring(recs)) return nil end

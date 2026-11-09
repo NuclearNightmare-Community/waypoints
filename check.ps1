@@ -1,23 +1,23 @@
 <#
 .SYNOPSIS
-  Judges one run of Markers from UE4SS.log.
+  Judges one run of Waypoints from UE4SS.log.
 .DESCRIPTION
-  Prints Markers', the driver's and UE4SS's relevant lines, then checks the patterns the scenario needs.
+  Prints Waypoints', the driver's and UE4SS's relevant lines, then checks the patterns the scenario needs.
   A pattern must match somewhere; "!pattern" must match nowhere; "#N|pattern" must match exactly N lines;
   "?pattern" is a soft check (reported as "warn:", never failing); "?!pattern" is a soft check that it matches nowhere.
   Then the scenario's computed checks: READY after CONNECT ok; LOST before the first REVIVE; every REVIVE, REBOUND and
   AGAIN followed by its RESTORED or CLEARED line before the next one; and for probe, the story 2 answers.
   Exit code 1 when any check fails; otherwise prints "All checks passed."
   Scenarios (run.ps1 drives them): probe, revive, death, no-core, old-core. Pair scenarios (tools/vm/pair.ps1 with
-  test/pair/markers-scenarios.ps1): pair-victim and pair-hostvictim judge the modded player's log, pair-host the host's
-  driver. hand: a log from the README's hand check (Markers connected, no error, and every revive acted on).
+  test/pair/waypoints-scenarios.ps1): pair-victim and pair-hostvictim judge the modded player's log, pair-host the host's
+  driver. hand: a log from the README's hand check (Waypoints connected, no error, and every revive acted on).
   unit needs no log: it runs test.ps1.
-  -Target vm judges a log from run.ps1 -Target vm: core's "hud slow tick" WARN under Markers' tag is soft there (the
-  VM's game shares the CPU with the host). Markers has no timing scenario, so nothing is host-only.
+  -Target vm judges a log from run.ps1 -Target vm: core's "hud slow tick" WARN under Waypoints' tag is soft there (the
+  VM's game shares the CPU with the host). Waypoints has no timing scenario, so nothing is host-only.
 .EXAMPLE
-  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\markers\revive.log -Scenario revive
+  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\waypoints\revive.log -Scenario revive
   ./check.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario hand
-  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\markers\probe.vm.log -Scenario probe -Target vm
+  ./check.ps1 -Log C:\...\nuclear-nightmare\dumps\v8.1.2-build26193463\waypoints\probe.vm.log -Scenario probe -Target vm
 #>
 param(
     [string] $Instance,
@@ -31,7 +31,7 @@ $CoreName = 'Nucleus'
 $manifest = Get-Content (Join-Path $PSScriptRoot 'mod.json') -Raw | ConvertFrom-Json
 $name = $manifest.name
 $C = [regex]::Escape($name); $D = [regex]::Escape("${name}Driver"); $K = [regex]::Escape($CoreName)
-$needVer = ($manifest.dependsOn | Where-Object id -eq $CoreName.ToLowerInvariant()).version.TrimStart('^')
+$needVer = ($manifest.dependsOn | Where-Object id -eq $CoreName.ToLowerInvariant()).version
 $NeedRx = [regex]::Escape($needVer)
 if (-not $Log) {
     if (-not $Instance) { Write-Host 'FAIL: pass -Log <file> or -Instance <copy>'; exit 1 }
@@ -56,7 +56,7 @@ $always = @(
     "!\[$D\] FAIL "
     "!\[$D\] .*STEP '.*' threw"
 )
-# Core's UI helpers log with Markers' tag; a slow tick is core's to judge (soft). In the VM every slow tick is soft.
+# Core's UI helpers log with Waypoints' tag; a slow tick is core's to judge (soft). In the VM every slow tick is soft.
 $warnRule = if ($Target -eq 'vm') { "!\[$C\] WARN (?!hud slow tick )" } else { "!\[$C\] WARN (?!hud slow tick .*(HUD event|steady state, a Lua GC step ran inside it))" }
 $running = @(
     "\[$C\] CONNECT ok $K \d+\.\d+\.\d+ "
@@ -64,7 +64,7 @@ $running = @(
     "!\[$C\] ERROR"
     $warnRule
     "?!\[$C\] WARN hud slow tick "
-    # Local only (CAP-3): every waypoint Markers spawns is unreplicated.
+    # Local only (CAP-3): every waypoint Waypoints spawns is unreplicated.
     "!\[$C\] RESTORE .*bReplicates=true"
     # The deferred spawn is the game's own path; the fallback working is fine, but say so.
     "?!\[$C\] RESTORE .*via SpawnActor\+ReceiveBeginPlay"
@@ -81,7 +81,7 @@ $expect = @{
     'probe' = $driven + @(
         "\[$C\] PAWN first "
         $noAction
-        "\[$D\] OK MARKED mark 4 markers", "\[$D\] OK DRAWN before ", "\[$D\] OK REPRO ", "\[$D\] OK RESPAWN-DRAWN ", "\[$D\] OK LIVENESS ", "\[$D\] OK LIVEOK "
+        "\[$D\] OK MARKED mark 4 waypoints", "\[$D\] OK DRAWN before ", "\[$D\] OK REPRO ", "\[$D\] OK RESPAWN-DRAWN ", "\[$D\] OK LIVENESS ", "\[$D\] OK LIVEOK "
         "\[$D\] ANSWER construct-every-open=(yes|no|unknown) ", "\[$D\] ANSWER repair "
     )
     'revive' = $driven + @(
@@ -96,7 +96,7 @@ $expect = @{
         "!\[$C\] RESTORED .*failed [1-9]"
         "!\[$C\] CLEARED .*failed [1-9]"
         "!\[$C\] REBOUND "
-        "\[$D\] OK MARKED mark 3 markers", "\[$D\] OK DRAWN before "
+        "\[$D\] OK MARKED mark 3 waypoints", "\[$D\] OK DRAWN before "
         "\[$D\] OK NONE revive2 ", "\[$D\] OK NOPAINT revive2 ", "\[$D\] OK FLAGSNONE revive2 "
         "\[$D\] ANSWER journal-same-after-revive=(yes|no)"
     ) + (Get-RestoredChecks 'revive1')
@@ -104,19 +104,19 @@ $expect = @{
         "\[$C\] PAWN first "
         "\[$C\] LOST pawn=.* snapshot n=3 \(locations 2, satellite 1\)"
         $noAction
-        "\[$D\] OK MARKED mark 3 markers", "\[$D\] OK DEAD ", "\[$D\] OK KEPT ", "\[$D\] OK UNTOUCHED "
+        "\[$D\] OK MARKED mark 3 waypoints", "\[$D\] OK DEAD ", "\[$D\] OK KEPT ", "\[$D\] OK UNTOUCHED "
     )
     'no-core' = @(
         "#1|\[$C\] "
         "\[$C\] $K is not installed\. $C will not run\.\s*$"
-        "\[$D\] OK NOMARKERS match1 "
+        "\[$D\] OK NOWAYPOINTS match1 "
         "\[$D\] END result=PASS"
     )
     'old-core' = @(
         "#1|\[$C\] "
         "\[$D\] OLDCORE published $($K.ToLowerInvariant())\.version=0\.1\.0 "
-        "\[$C\] ERROR $K 0\.1\.0 is not compatible; $C needs $NeedRx \(\^ rules\)\. Update $K\. $C will not run\.\s*$"
-        "\[$D\] OK NOMARKERS match1 "
+        "\[$C\] ERROR $K 0\.1\.0 is older than $C needs \($NeedRx\)\. Update $K\. $C will not run\.\s*$"
+        "\[$D\] OK NOWAYPOINTS match1 "
         "\[$D\] END result=PASS"
     )
     'pair-victim' = $driven + @(
@@ -182,7 +182,7 @@ if ($Scenario -notin 'no-core', 'old-core', 'pair-host') {
 }
 if ($Scenario -in 'probe', 'revive', 'pair-victim', 'pair-hostvictim') {
     Write-Host '--- answers ---'
-    $lines | Where-Object { $_ -match "\[$D\] (ANSWER|MAPOPEN|PAINT|AIM|LIVENESS|REPAIR|RESPAWN|JOURNAL) " } | ForEach-Object { Write-Host ($_ -replace '^.*\[MarkersDriver\] ', '') }
+    $lines | Where-Object { $_ -match "\[$D\] (ANSWER|MAPOPEN|PAINT|AIM|LIVENESS|REPAIR|RESPAWN|JOURNAL) " } | ForEach-Object { Write-Host ($_ -replace '^.*\[WaypointsDriver\] ', '') }
 }
 
 if ($failed) { Write-Host "$failed check(s) failed."; exit 1 }
