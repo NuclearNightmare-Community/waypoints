@@ -32,11 +32,17 @@
 --            Selected; the map closed and reopened by the key: every flag's Selected matches its actor (FLAGSMATCH).
 --            Waypoints' own MARKALL / CLEARALL / MAPSYNC lines are judged by check.ps1 against the EXPECT line.
 --   no-core, old-core: in a match: nothing from Waypoints (check.ps1 judges its one line).
+--   The solo scenarios travel to the map named in Scripts/map.txt (deploy.ps1 -Test -Map): a key of the fixed MAPS
+--   table, never a path; an unknown key ends the run (FAIL MAP) before any travel; no map.txt is Tower Island. They log
+--   "MAP <key> <path> flags=<n>", and buttons checks the map's distinct flag names against n (FLAGCOUNT).
 --   pair-victim:     (B, a client in the VM) marks, dies on the host's signal (kill.txt: CallDamageEvent(1000) on its
---                    own pawn), is revived by the host's radio; then the revive 1 checks on the client.
---   pair-host:       (A, the host, Waypoints not needed) once B is in the match: waits, signals B's kill (and kills B
---                    itself if B is still alive 30 s later), waits for B's death, calls the radio's Reinformant (the
---                    computer's "call reinforcement"), waits for B's new character.
+--                    own pawn), is revived by the host's radio; then the revive 1 checks on the client; then Mark all
+--                    and Clear all on the map opened from Lua, each pressed through core's <Core>_OnClicked() (BPRESS;
+--                    not an OS click), with the world checks of buttons (phase "pair").
+--   pair-host:       (A, the host, Waypoints not needed) once B is in the match: marks one location flag of its own,
+--                    waits, signals B's kill (and kills B itself if B is still alive 30 s later), waits for B's death,
+--                    calls the radio's Reinformant (the computer's "call reinforcement"), waits for B's new character
+--                    and 90 s for B's checks and buttons; then its own waypoint must be untouched (UNAFFECTED host).
 --   pair-hostvictim: (A, the host, modded) marks, dies, calls the radio's Reinformant itself, then the revive checks.
 -- Keys it can't press itself (Enter for touchdown, the map key) and real mouse clicks ("click x y", desktop pixels) go
 -- to run.ps1 through request.txt / done.txt next to this file.
@@ -75,7 +81,27 @@ local REQ, DONE = scriptDir .. "\\request.txt", scriptDir .. "\\done.txt"
 os.remove(REQ); os.remove(DONE)
 
 local MENU_MAP = "/Game/Maps/NewMainMenu"
-local MATCH_MAP = "/Game/Maps/SmallLoweIsland/SmallMap"
+-- The solo match map (Scripts/map.txt, written by deploy.ps1 -Test -Map, holds only a key of this fixed table; no file
+-- content ever becomes a path). flags: the map's distinct location flag names (LevelLocationMap_C on V8.2.1, the SPEC's
+-- counts). No map.txt: Tower Island, as before the table existed.
+local MAPS = {
+    LowIsland   = { path = "/Game/Maps/Gameplay", flags = 10 },
+    TowerIsland = { path = "/Game/Maps/SmallLoweIsland/SmallMap", flags = 6 },
+    Forest      = { path = "/Game/Maps/ForestMap/ForestMap", flags = 7 },
+    Crevasse    = { path = "/Game/Maps/CravasseMapV2/CravasseMap", flags = 9 },
+}
+local MAP_KEY, MAP_BAD = "TowerIsland", nil
+do
+    local f = io.open(scriptDir .. "\\map.txt", "r")
+    if f then
+        local raw = f:read("*a") or ""
+        f:close()
+        local key = raw:match("^%s*(.-)%s*$")
+        if MAPS[key] then MAP_KEY = key else MAP_BAD = key:gsub("[^%w%p ]", "?"):sub(1, 40) end
+    end
+end
+local MAP = MAPS[MAP_KEY]
+local MATCH_MAP = MAP.path
 local FP = "BP_FirstPersonCharacter_C"
 local JOURNAL_CLASS = "/Game/Graphics/Journal/Journal.Journal_C"
 local LOC_CLICK = "BndEvt__LevelLocationUI_Button_28_K2Node_ComponentBoundEvent_0_OnButtonClickedEvent__DelegateSignature"
@@ -435,7 +461,7 @@ end
 local function enterMatch(phase)
     waitWorld(phase, "NewMainMenu", 120)
     travel(phase, MATCH_MAP, "listen")
-    waitWorld(phase, "SmallMap", 150)
+    waitWorld(phase, MATCH_MAP .. ".", 150) -- the world's full name holds <path>.<name>
     touchdown(phase)
     waitHud(phase, 90)
 end
@@ -928,6 +954,51 @@ local function distinctNames()
     for _, f in ipairs(list) do names[#names + 1] = text(f.Name) end
     return names, sat ~= nil
 end
+-- The pair client's press: no OS click can be served in a pair run (nothing posts input to the VM's game from the
+-- driver), so the driver calls the button widget's <Core>_OnClicked(), the Blueprint function the button's OnClicked
+-- calls; core's dispatch hook runs on it as on a real click (core's SkelTest BDOUBLE does the same). Not an OS click.
+local function pressButton(phase, id)
+    step(phase .. ": press " .. id, function()
+        local w, why, np, nb = buttonWidget(id)
+        if not check(w ~= nil, "BPOINT %s '%s' is on the map page%s", phase, id, why and (" (" .. why .. ")") or "") then return end
+        check(np == 1 and nb == 1, "BONE %s one Waypoints panel and one '%s' button on the map page (%d, %d)", phase, id, np or 0, nb or 0)
+        local fn = CORE .. "_OnClicked"
+        local ok, err = pcall(function() w[fn](w) end)
+        say("BPRESS %s via %s ok=%s%s", id, fn, tostring(ok), ok and "" or (" " .. tostring(err)))
+        if not ok then check(false, "BPRESS %s '%s' %s() threw", phase, id, fn) end
+    end)
+    step(phase .. ": settle " .. id, function() return after(1.5), 4, "press settle" end)
+end
+-- After Mark all: one live waypoint actor per distinct flag name (and the satellite), every flag widget Selected, all
+-- unreplicated. S.flagNames / S.hasSat from the open map.
+local function markedCheck(phase)
+    step(phase .. ": check", function()
+        local wp, total = waypoints()
+        say("WAYPOINTS %s total=%d %s", phase, total, describe(wp))
+        local one, miss = true, {}
+        for _, n in ipairs(S.flagNames) do if not (wp[n] and wp[n].n == 1) then one = false; miss[#miss + 1] = n end end
+        if S.hasSat and not (wp.Satellite and wp.Satellite.n == 1) then one = false; miss[#miss + 1] = "Satellite" end
+        local want = #S.flagNames + (S.hasSat and 1 or 0)
+        check(one and total == want, "ALLMARKED %s one live waypoint actor per flag%s (%d actors, want %d)%s", phase, S.hasSat and " and the satellite" or "",
+            total, want, #miss > 0 and (" not: " .. table.concat(miss, ",")) or "")
+        local states, off = allFlagStates(), {}
+        for _, f in ipairs(states) do if not f.selected then off[#off + 1] = f.name end end
+        check(#states > 0 and #off == 0, "ALLSELECTED %s every flag Selected (%d widgets)%s", phase, #states, #off > 0 and (" not: " .. table.concat(off, ",")) or "")
+        local rep = true
+        for _, e in pairs(wp) do rep = rep and e.replicates == false end
+        check(rep, "LOCAL %s every waypoint actor has bReplicates=false", phase)
+    end)
+end
+-- After Clear all: no live waypoint actor, no flag widget Selected.
+local function clearedCheck(phase)
+    step(phase .. ": check", function()
+        local wp, total = waypoints()
+        check(total == 0, "ALLCLEARED %s no live waypoint actor left (%d: %s)", phase, total, describe(wp))
+        local states, on = allFlagStates(), {}
+        for _, f in ipairs(states) do if f.selected then on[#on + 1] = f.name end end
+        check(#states > 0 and #on == 0, "NONESELECTED %s no flag Selected (%d widgets)%s", phase, #states, #on > 0 and (" still: " .. table.concat(on, ",")) or "")
+    end)
+end
 
 -- ---------------------------------------------------------------- scenarios
 local function buildProbe()
@@ -1124,32 +1195,12 @@ local function buildButtons()
         S.expectMarked = #names - 2 + (sat and 1 or 0)
         say("EXPECT buttons marked=%d flags=%d satellite=%s (%s)", S.expectMarked, #names, sat and "yes" or "no", table.concat(names, ","))
         check(#names > 2, "FLAGS buttons the map has %d location flags", #names)
+        check(#names == MAP.flags, "FLAGCOUNT buttons %d distinct location flags on %s (the table says %d)", #names, MAP_KEY, MAP.flags)
     end)
     clickButton("markall", "markAll")
-    step("markall: check", function()
-        local wp, total = waypoints()
-        say("WAYPOINTS markall total=%d %s", total, describe(wp))
-        local one, miss = true, {}
-        for _, n in ipairs(S.flagNames) do if not (wp[n] and wp[n].n == 1) then one = false; miss[#miss + 1] = n end end
-        if S.hasSat and not (wp.Satellite and wp.Satellite.n == 1) then one = false; miss[#miss + 1] = "Satellite" end
-        local want = #S.flagNames + (S.hasSat and 1 or 0)
-        check(one and total == want, "ALLMARKED markall one live waypoint actor per flag%s (%d actors, want %d)%s", S.hasSat and " and the satellite" or "",
-            total, want, #miss > 0 and (" not: " .. table.concat(miss, ",")) or "")
-        local states, off = allFlagStates(), {}
-        for _, f in ipairs(states) do if not f.selected then off[#off + 1] = f.name end end
-        check(#states > 0 and #off == 0, "ALLSELECTED markall every flag Selected (%d widgets)%s", #states, #off > 0 and (" not: " .. table.concat(off, ",")) or "")
-        local rep = true
-        for _, e in pairs(wp) do rep = rep and e.replicates == false end
-        check(rep, "LOCAL markall every waypoint actor has bReplicates=false")
-    end)
+    markedCheck("markall")
     clickButton("clearall", "clearAll")
-    step("clearall: check", function()
-        local wp, total = waypoints()
-        check(total == 0, "ALLCLEARED clearall no live waypoint actor left (%d: %s)", total, describe(wp))
-        local states, on = allFlagStates(), {}
-        for _, f in ipairs(states) do if f.selected then on[#on + 1] = f.name end end
-        check(#states > 0 and #on == 0, "NONESELECTED clearall no flag Selected (%d widgets)%s", #states, #on > 0 and (" still: " .. table.concat(on, ",")) or "")
-    end)
+    clearedCheck("clearall")
     keyMap("close", false)
     keyMap("reopen", true)
     step("reopen: flags", function()
@@ -1223,12 +1274,31 @@ local function buildPairVictim()
     step("dead", function() local p = myPawn() say("DEAD pawn=%s class=%s", p and pathOf(p) or "none", p and classOf(p) or "none") end)
     waitPawnChange("revive", 600)
     restoredChecks("revive")
+    -- Mark all / Clear all on the client after the revive: the map opened from Lua (core's Journal poller sees it and
+    -- attaches the buttons), each button pressed through core's own click function (pressButton), the same world checks
+    -- as solo.
+    wait("pair: map closed a while", 2) -- core's 500 ms Journal poll sees the close before the next open
+    step("pair: open map", function() openMap("pair") return after(2), 5, "map open" end)
+    step("pair: expect", function()
+        local names, sat = distinctNames()
+        S.flagNames, S.hasSat = names, sat
+        say("EXPECT pair flags=%d satellite=%s already=%d (%s)", #names, sat and "yes" or "no", #S.marked, table.concat(names, ","))
+        check(#names > 2, "FLAGS pair the map has %d location flags", #names)
+    end)
+    pressButton("pair", "markAll")
+    markedCheck("pair")
+    pressButton("pair", "clearAll")
+    clearedCheck("pair")
+    step("pair: close map", function() closeMap() say("VICTIM buttons done") return after(1), 5, "map closed" end)
 end
 local function buildPairHost()
     waitMatch("match", 900)
     step("victim present", function()
         return function() return #remotePCs() > 0 and pawnOf(remotePCs()[1]) ~= nil and classOf(pawnOf(remotePCs()[1])) == FP end, 600, "the other player's character"
     end)
+    -- CAP-3: the unmodded host's own waypoint, checked again after the victim's revive and buttons (UNAFFECTED).
+    mark("host", 1, true)
+    step("host: own waypoint", function() S.hostMark = S.marked[1] say("HOSTMARK '%s'", tostring(S.hostMark)) end)
     wait("victim marks", 90) -- the victim opens its map and marks (it logs VICTIM ready on its own machine)
     -- The line is the signal: pair.ps1 waits for it and writes the victim's kill.txt; the victim calls
     -- CallDamageEvent(1000) on its own pawn (a server RPC: the damage runs here). If the victim's character is still
@@ -1285,7 +1355,27 @@ local function buildPairHost()
     step("revived", function()
         local p = pawnOf(remotePCs()[1])
         check(p ~= nil and classOf(p) == FP and pathOf(p) ~= S.killed, "REVIVED the victim has a new first-person character %s", p and pathOf(p) or "none")
-        return after(30), 35, "let the victim check"
+        -- The victim's restore checks (up to ~20 s restore wait, a paint check per waypoint) and its Mark all / Clear all.
+        return after(90), 95, "let the victim check and press its buttons"
+    end)
+    -- The host's own state after the victim's revive, Mark all and Clear all: exactly its one waypoint actor, same name,
+    -- its flag Selected, no other waypoint actor.
+    step("host: open map", function() openMap("host-after") return after(2), 5, "map open" end)
+    step("host: unaffected", function()
+        local wp, total = waypoints()
+        say("WAYPOINTS host-after total=%d %s", total, describe(wp))
+        local list, sat = flags()
+        local flagSel, others = nil, {}
+        for _, f in ipairs(list) do
+            local n = text(f.Name)
+            if n == S.hostMark then flagSel = f.Selected == true elseif f.Selected then others[#others + 1] = n end
+        end
+        if sat and sat.Selected then others[#others + 1] = "Satellite" end
+        local mine = S.hostMark and wp[S.hostMark]
+        check(S.hostMark ~= nil and total == 1 and mine ~= nil and mine.n == 1 and flagSel == true and #others == 0,
+            "UNAFFECTED host its own waypoint '%s' untouched: %d waypoint actor(s) (want 1, its own), its flag Selected=%s, other flags selected: %s",
+            tostring(S.hostMark), total, tostring(flagSel), #others > 0 and table.concat(others, ",") or "none")
+        closeMap()
     end)
 end
 local function buildPairHostVictim()
@@ -1342,6 +1432,13 @@ if not build then
     say("END result=FAIL checks=0 failures=1 reason=unknown-scenario %s", SCENARIO)
     return
 end
+if MAP_BAD then
+    say("FAIL MAP unknown map key '%s' in map.txt (known: Crevasse, Forest, LowIsland, TowerIsland); not travelling", MAP_BAD)
+    say("END result=FAIL checks=0 failures=1 reason=unknown-map")
+    return
+end
+-- The solo scenarios travel to MAP; a pair's map is PairDriver's.
+if not SCENARIO:find("^pair%-") then say("MAP %s %s flags=%d", MAP_KEY, MAP.path, MAP.flags) end
 build()
 -- A game-thread loop (never LoopAsync + ExecuteInGameThread: the pinned UE4SS can lose those callbacks).
 local runner

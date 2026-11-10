@@ -226,6 +226,24 @@ try {
     Ok (Test-Path (Join-Path $mods 'WaypointsDriver\Scripts\main.lua')) 'deploy -Test: the driver installed'
     $d = Deploy @('-Test', '-Scenario', 'buttons')
     Ok ($d.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $mods 'WaypointsDriver\Scripts\scenario.txt')) -eq 'buttons') 'deploy -Test: buttons' $d.Out
+    # -Map (story 4): only a key of the driver's table, written to map.txt with -Test; a stale one removed.
+    $mapTxt = Join-Path $mods 'WaypointsDriver\Scripts\map.txt'
+    Ok (-not (Test-Path $mapTxt)) 'deploy -Test without -Map: no map.txt (the driver''s default map)'
+    $d = Deploy @('-Test', '-Scenario', 'buttons', '-Map', 'Forest')
+    Ok ($d.Code -eq 0 -and (Test-Path $mapTxt) -and [IO.File]::ReadAllText($mapTxt) -eq 'Forest') 'deploy -Test -Map Forest: map.txt holds only the key' $d.Out
+    foreach ($k in 'LowIsland', 'TowerIsland', 'Crevasse') {
+        $d = Deploy @('-Test', '-Scenario', 'buttons', '-Map', $k)
+        Ok ($d.Code -eq 0 -and [IO.File]::ReadAllText($mapTxt) -eq $k) "deploy -Test -Map ${k}: map.txt" $d.Out
+    }
+    $d = Deploy @('-Test', '-Scenario', 'buttons')
+    Ok ($d.Code -eq 0 -and -not (Test-Path $mapTxt)) 'deploy -Test after -Map: the stale map.txt removed' $d.Out
+    Set-Content $mapTxt 'Forest' # a stray copy in the installed driver
+    $d = Deploy @('-Test', '-Scenario', 'revive')
+    Ok ($d.Code -eq 0 -and -not (Test-Path $mapTxt)) 'deploy -Test: a stray map.txt removed' $d.Out
+    $d = Deploy @('-Test', '-Scenario', 'buttons', '-Map', '../x')
+    Ok ($d.Out -match 'does not belong to the set' -and -not (Test-Path $mapTxt)) 'deploy -Map ../x: refused by the parameter' $d.Out
+    $d = Deploy @('-Map', 'Forest')
+    Ok ($d.Code -eq 0 -and $d.Out -match 'needs -Test' -and -not (Test-Path (Join-Path $mods 'WaypointsDriver'))) 'deploy -Map without -Test: warns, writes nothing' $d.Out
     $d = Deploy @('-Test', '-Scenario', 'pair-victim', '-Staged')
     Ok ($d.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $mods 'WaypointsDriver\Scripts\scenario.txt')) -eq 'pair-victim') 'deploy -Test -Staged: pair-victim' $d.Out
     $d = Deploy @()

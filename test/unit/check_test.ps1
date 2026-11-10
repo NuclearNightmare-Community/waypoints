@@ -140,12 +140,13 @@ Expect (Without $death 'OK SPECTATOR death') 'death' 1 'death: no spectator -> f
 # ---------------------------------------------------------------- buttons (story 3)
 # Tower Island: 6 location flags and the satellite flag; 2 marked by hand, so Mark all marks 4 + the satellite.
 $buttons = (Start-Log 'buttons') + @(
+    (Dr 'MAP TowerIsland /Game/Maps/SmallLoweIsland/SmallMap flags=6'),
     (Dr 'LOBBY match1 countdown 0:30; set to 0:02'), (M 'MAPSYNC flags=6 selected=0 satellite=no'),
     (Dr 'OK MARKED mark 2 waypoints, one waypoint actor each (Crash Site,Weather Station)'),
     (Dr 'MAPKEY M (IA_Map keys in IMC_Default: M)'), (Dr 'OK MAPKEY IA_Map is bound to the letter M in IMC_Default'),
     (Dr 'MAPKEY buttons pressing M to open the map'), (M 'MAPSYNC flags=6 selected=2 satellite=no'),
     (Dr 'EXPECT buttons marked=5 flags=6 satellite=yes (Weather Station,Crash Site,Installation Entrance #1,Installation Entrance #2,Construction Site,Military Outpost)'),
-    (Dr 'OK FLAGS buttons the map has 6 location flags'),
+    (Dr 'OK FLAGS buttons the map has 6 location flags'), (Dr 'OK FLAGCOUNT buttons 6 distinct location flags on TowerIsland (the table says 6)'),
     (Dr 'OK BPOINT markall ''markAll'' is on the map page with a screen rectangle (3000,1300)-(3100,1330)'), (Dr 'OK BONE markall one Waypoints panel and one ''markAll'' button on the map page (1, 1)'),
     (M "MARK location 'Installation Entrance #1'"), (M "MARK location 'Installation Entrance #2'"), (M "MARK location 'Construction Site'"),
     (M "MARK location 'Military Outpost'"), (M 'MARK satellite'),
@@ -177,6 +178,16 @@ Expect ($buttons[0..($lastSync - 1)] + $buttons[($lastSync + 1)..($buttons.Count
 Expect ($buttons + @(M 'WARN Mark all skipped: the map is not open')) 'buttons' 1 'buttons: a WARN -> fails' 'WARN'
 Expect ($buttons + @(Dr 'FAIL ALLSELECTED markall every flag Selected (7 widgets) not: Military Outpost')) 'buttons' 1 'buttons: a driver FAIL -> fails' 'FAIL'
 Expect ($buttons + @(M 'REVIVE pawn=x was=y snapshot=0 onRevive=restore')) 'buttons' 1 'buttons: a revive action -> fails' 'REVIVE'
+# Story 4: the map (-Map) and its flag count from the driver's table.
+Expect (Without $buttons '\] MAP ') 'buttons' 1 'buttons: no MAP line -> fails' 'MAP'
+Expect (Without $buttons 'OK FLAGCOUNT') 'buttons' 1 'buttons: no FLAGCOUNT -> fails' 'FLAGCOUNT'
+Expect ($buttons -replace 'SmallMap flags=6', 'SmallMap flags=7') 'buttons' 1 'buttons: MARKALL flags differ from the MAP table count -> fails' "MARKALL flags=6 is TowerIsland's 7"
+# Forest: 7 location flags, the same run on another map.
+$forest = $buttons -replace 'MAP TowerIsland /Game/Maps/SmallLoweIsland/SmallMap flags=6', 'MAP Forest /Game/Maps/ForestMap/ForestMap flags=7' `
+    -replace 'flags=6', 'flags=7' -replace 'marked=5 flags=6', 'marked=6 flags=7' -replace 'EXPECT buttons marked=5', 'EXPECT buttons marked=6' `
+    -replace 'MARKALL marked=5 already=2 failed=0 waypoints=7', 'MARKALL marked=6 already=2 failed=0 waypoints=8'
+Expect $forest 'buttons' 0 'buttons: Forest (7 flags) passes' "MARKALL flags=7 is Forest's 7"
+Expect ($forest + @(Dr 'MAP Crevasse /Game/Maps/CravasseMapV2/CravasseMap flags=9')) 'buttons' 1 'buttons: two MAP lines -> fails' '#1'
 
 # ---------------------------------------------------------------- no-core, old-core
 $noCore = @((U "Starting Lua mod 'WaypointsDriver'"), (Dr 'SCENARIO no-core'), (U "Starting Lua mod 'Waypoints'"),
@@ -194,17 +205,42 @@ $victim = (Start-Log 'pair-victim') + @(
     (Dr 'OK MARKED mark 3 waypoints, one waypoint actor each (Crash Site,Satellite,Weather Station)'), (Dr 'VICTIM ready marked=Crash Site,Satellite,Weather Station'),
     (Dr "SELFKILL the host's signal: CallDamageEvent(1000) on my pawn $P1 ok=true "), (Dr 'DYING victim +0.2 s guard=false hp=-900.0'),
     (Dr 'OK DIED victim the character took the game''s death (+0.2 s)'), (Dr 'OK SPECTATOR victim the controller''s pawn became Spectator_C (Spectator_C at +12.1 s)'),
-    (M "LOST pawn=$P1 snapshot n=3 (locations 2, satellite 1)"), (M "REVIVE pawn=$P2 was=$P1 snapshot=3 onRevive=restore")) + (Restored) + (DriverRestored 'revive') + @($endPass)
+    (M "LOST pawn=$P1 snapshot n=3 (locations 2, satellite 1)"), (M "REVIVE pawn=$P2 was=$P1 snapshot=3 onRevive=restore")) + (Restored) + (DriverRestored 'revive')
+# Story 4: Mark all / Clear all on the client after the revive, pressed through Nucleus_OnClicked.
+$victimButtons = @(
+    (M 'MAPSYNC flags=6 selected=3 satellite=yes'), (Dr 'EXPECT pair flags=6 satellite=yes already=3 (A,B,C,D,E,F)'),
+    (Dr 'OK BPOINT pair ''markAll'' is on the map page'), (Dr 'OK BONE pair one Waypoints panel and one ''markAll'' button on the map page (1, 1)'),
+    (Dr 'BPRESS markAll via Nucleus_OnClicked ok=true'),
+    (M "MARK location 'C'"), (M 'MARKALL marked=4 already=3 failed=0 waypoints=7 flags=6 satellite=yes'),
+    (Dr 'OK ALLMARKED pair one live waypoint actor per flag and the satellite (7 actors, want 7)'), (Dr 'OK ALLSELECTED pair every flag Selected (7 widgets)'),
+    (Dr 'OK LOCAL pair every waypoint actor has bReplicates=false'),
+    (Dr 'OK BPOINT pair ''clearAll'' is on the map page'), (Dr 'BPRESS clearAll via Nucleus_OnClicked ok=true'),
+    (M 'CLEARALL cleared=7 direct=0 failed=0 waypoints=0 flags=6'),
+    (Dr 'OK ALLCLEARED pair no live waypoint actor left (0: )'), (Dr 'OK NONESELECTED pair no flag Selected (7 widgets)'), (Dr 'VICTIM buttons done'))
+$victim = $victim + $victimButtons + @($endPass)
 Expect $victim 'pair-victim' 0 'pair-victim: passes as written' 'All checks passed'
+Expect (Without $victim 'BPRESS markAll') 'pair-victim' 1 'pair-victim: Mark all never pressed -> fails' 'BPRESS markAll'
+Expect ($victim -replace 'BPRESS clearAll via Nucleus_OnClicked ok=true', 'BPRESS clearAll via Nucleus_OnClicked ok=false boom') 'pair-victim' 1 'pair-victim: a press that threw -> fails' 'BPRESS clearAll'
+Expect ($victim -replace 'MARKALL marked=4 already=3 failed=0', 'MARKALL marked=3 already=3 failed=1') 'pair-victim' 1 'pair-victim: a failed mark -> fails' 'failed=0'
+Expect ($victim -replace 'MARKALL marked=4 already=3', 'MARKALL marked=5 already=2') 'pair-victim' 1 'pair-victim: the restored 3 not already up -> fails' 'already=3'
+Expect ($victim -replace 'failed=0 waypoints=0 flags=6', 'failed=0 waypoints=1 flags=6') 'pair-victim' 1 'pair-victim: a waypoint left after Clear all -> fails' 'waypoints=0'
+Expect (Without $victim 'OK ALLMARKED pair') 'pair-victim' 1 'pair-victim: no ALLMARKED -> fails' 'ALLMARKED pair'
+Expect (Without $victim 'OK ALLCLEARED pair') 'pair-victim' 1 'pair-victim: no ALLCLEARED -> fails' 'ALLCLEARED pair'
+Expect (Without $victim 'OK NONESELECTED pair') 'pair-victim' 1 'pair-victim: no NONESELECTED -> fails' 'NONESELECTED pair'
+Expect ($victim + @(Dr 'FAIL BPOINT pair ''markAll'' is on the map page (no Waypoints panel on the map page)')) 'pair-victim' 1 'pair-victim: button not found -> fails' 'FAIL'
 Expect (Without $victim 'OK DRAWN revive') 'pair-victim' 1 'pair-victim: not drawn after the revive -> fails' 'DRAWN'
 Expect (Without $victim 'OK SPECTATOR victim') 'pair-victim' 1 'pair-victim: no spectator -> fails' 'SPECTATOR victim'
-$hostv = ($victim -replace 'SCENARIO pair-victim', 'SCENARIO pair-hostvictim' -replace '(OK (DIED|SPECTATOR)) victim', '$1 death')
+$hostv = (($victim | Where-Object { $victimButtons -notcontains $_ }) -replace 'SCENARIO pair-victim', 'SCENARIO pair-hostvictim' -replace '(OK (DIED|SPECTATOR)) victim', '$1 death')
 Expect $hostv 'pair-hostvictim' 0 'pair-hostvictim: passes as written' 'All checks passed'
 Expect (Without $hostv 'OK DIED death') 'pair-hostvictim' 1 'pair-hostvictim: the kill not seen dying -> fails' 'DIED death'
-$pairHost = @((Dr 'SCENARIO pair-host'), (Dr 'KILL victim x signal (the victim calls CallDamageEvent(1000) on its own pawn) guard=false hp=100.0'),
+$pairHost = @((Dr 'SCENARIO pair-host'), (Dr 'OK MARKED host 1 waypoints, one waypoint actor each (Crash Site)'), (Dr 'KILL victim x signal (the victim calls CallDamageEvent(1000) on its own pawn) guard=false hp=100.0'),
     (Dr 'DYING victim +3.1 s guard=true hp=-900.0'), (Dr 'VICTIM after death pawn class=Spectator_C'), (Dr 'OK SPECTATOR victim the victim''s pawn became Spectator_C (Spectator_C)'),
-    (Dr 'REINFORCE radio:Reinformant() ok=true '), (Dr "OK REVIVED the victim has a new first-person character $P2"), $endPass)
+    (Dr 'REINFORCE radio:Reinformant() ok=true '), (Dr "OK REVIVED the victim has a new first-person character $P2"),
+    (Dr 'OK UNAFFECTED host its own waypoint ''Crash Site'' untouched: 1 waypoint actor(s) (want 1, its own), its flag Selected=true, other flags selected: none'), $endPass)
 Expect $pairHost 'pair-host' 0 'pair-host: passes as written' 'All checks passed'
+Expect (Without $pairHost 'OK UNAFFECTED host') 'pair-host' 1 'pair-host: no UNAFFECTED -> fails' 'UNAFFECTED host'
+Expect ($pairHost -replace 'OK UNAFFECTED host', 'FAIL UNAFFECTED host') 'pair-host' 1 'pair-host: the host''s waypoint affected -> fails' 'UNAFFECTED host'
+Expect (Without $pairHost 'OK MARKED host') 'pair-host' 1 'pair-host: the host never marked its own flag -> fails' 'MARKED host'
 Expect (Without $pairHost 'OK SPECTATOR victim') 'pair-host' 1 'pair-host: no spectator check -> fails' 'SPECTATOR victim'
 Expect ($pairHost + @(Dr 'KILL victim FALLBACK still alive 30 s after the signal (hp=100.0): the host''s CallDamageEvent(1000) ok=true ')) 'pair-host' 0 'pair-host: the host''s fallback kill is only a warning' 'warn:.*FALLBACK'
 Expect ($pairHost -replace 'class=Spectator_C', 'class=BP_ThirdPersonCharacter_C') 'pair-host' 1 'pair-host: victim became a monster -> fails (inconclusive)' 'BP_ThirdPersonCharacter_C'
