@@ -179,15 +179,15 @@ Expect ($buttons + @(M 'WARN Mark all skipped: the map is not open')) 'buttons' 
 Expect ($buttons + @(Dr 'FAIL ALLSELECTED markall every flag Selected (7 widgets) not: Military Outpost')) 'buttons' 1 'buttons: a driver FAIL -> fails' 'FAIL'
 Expect ($buttons + @(M 'REVIVE pawn=x was=y snapshot=0 onRevive=restore')) 'buttons' 1 'buttons: a revive action -> fails' 'REVIVE'
 # Story 4: the map (-Map) and its flag count from the driver's table.
-Expect (Without $buttons '\] MAP ') 'buttons' 1 'buttons: no MAP line -> fails' 'MAP'
-Expect (Without $buttons 'OK FLAGCOUNT') 'buttons' 1 'buttons: no FLAGCOUNT -> fails' 'FLAGCOUNT'
+Expect (Without $buttons '\] MAP ') 'buttons' 1 'buttons: no MAP line -> fails' 'FAIL: #1\|.*\] MAP .*found 0'
+Expect (Without $buttons 'OK FLAGCOUNT') 'buttons' 1 'buttons: no FLAGCOUNT -> fails' 'FAIL: .*OK FLAGCOUNT'
 Expect ($buttons -replace 'SmallMap flags=6', 'SmallMap flags=7') 'buttons' 1 'buttons: MARKALL flags differ from the MAP table count -> fails' "MARKALL flags=6 is TowerIsland's 7"
 # Forest: 7 location flags, the same run on another map.
 $forest = $buttons -replace 'MAP TowerIsland /Game/Maps/SmallLoweIsland/SmallMap flags=6', 'MAP Forest /Game/Maps/ForestMap/ForestMap flags=7' `
-    -replace 'flags=6', 'flags=7' -replace 'marked=5 flags=6', 'marked=6 flags=7' -replace 'EXPECT buttons marked=5', 'EXPECT buttons marked=6' `
+    -replace 'flags=6', 'flags=7' -replace 'EXPECT buttons marked=5', 'EXPECT buttons marked=6' `
     -replace 'MARKALL marked=5 already=2 failed=0 waypoints=7', 'MARKALL marked=6 already=2 failed=0 waypoints=8'
 Expect $forest 'buttons' 0 'buttons: Forest (7 flags) passes' "MARKALL flags=7 is Forest's 7"
-Expect ($forest + @(Dr 'MAP Crevasse /Game/Maps/CravasseMapV2/CravasseMap flags=9')) 'buttons' 1 'buttons: two MAP lines -> fails' '#1'
+Expect ($forest + @(Dr 'MAP Crevasse /Game/Maps/CravasseMapV2/CravasseMap flags=9')) 'buttons' 1 'buttons: two MAP lines -> fails' 'FAIL: #1\|.*\] MAP .*found 2'
 
 # ---------------------------------------------------------------- no-core, old-core
 $noCore = @((U "Starting Lua mod 'WaypointsDriver'"), (Dr 'SCENARIO no-core'), (U "Starting Lua mod 'Waypoints'"),
