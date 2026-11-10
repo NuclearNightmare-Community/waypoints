@@ -56,8 +56,9 @@ $always = @(
     "!\[$D\] FAIL "
     "!\[$D\] .*STEP '.*' threw"
 )
-# Core's UI helpers log with Waypoints' tag; a slow tick is core's to judge (soft). In the VM every slow tick is soft.
-$warnRule = if ($Target -eq 'vm') { "!\[$C\] WARN (?!hud slow tick )" } else { "!\[$C\] WARN (?!hud slow tick .*(HUD event|steady state, a Lua GC step ran inside it))" }
+# Core's UI helpers log with Waypoints' tag; a slow tick is core's to judge (soft). On the host a steady-state one is
+# judged after the patterns (a computed check: soft during a map arrival); in the VM every slow tick is soft.
+$warnRule = "!\[$C\] WARN (?!hud slow tick )"
 $running = @(
     "\[$C\] CONNECT ok $K \d+\.\d+\.\d+ "
     "#1|\[$C\] READY onRevive=(restore|clear)\s*$"
@@ -189,6 +190,23 @@ if ($Scenario -notin 'no-core', 'old-core', 'pair-host') {
         $il, $iv = (IndexOf "\[$C\] LOST pawn="), (IndexOf "\[$C\] REVIVE pawn=")
         if ($il -ge 0 -and $iv -gt $il) { Pass 'the snapshot (LOST) comes before the first REVIVE' } else { Fail "LOST before REVIVE (LOST at line $il, REVIVE at line $iv)" }
     }
+}
+# Core's HUD poll (it logs with Waypoints' tag; Waypoints itself has no per-tick work). On the host a steady-state slow
+# tick fails, unless a Lua GC step ran inside it or it came during a map arrival: from the driver's WORLD or TOUCHDOWN
+# line to its HUD line, while the game loads the map and plays the landing showcase. V8.2.1 revive (2026-11-09): one
+# 2208 us poll there, between VIEW and HUD; the minute's average 91 us, the next minute's max 202 us.
+if ($Target -eq 'host' -and $Scenario -notin 'no-core', 'old-core') {
+    $arriving = $false; $slowHard = @(); $slowSoft = 0
+    foreach ($l in $lines) {
+        if ($l -match "\[$D\] (WORLD|TOUCHDOWN) ") { $arriving = $true }
+        elseif ($l -match "\[$D\] HUD \S+ pawn=") { $arriving = $false }
+        elseif ($l -match "\[$C\] WARN hud slow tick " -and $l -notmatch 'HUD event|a Lua GC step ran inside it') {
+            if ($arriving) { $slowSoft++ } else { $slowHard += ($l -replace '^.*\] WARN ', '') }
+        }
+    }
+    $rule = 'no steady-state hud slow tick outside a map arrival'
+    if ($slowHard) { Fail "$rule (not: $($slowHard -join '; '))" }
+    else { Pass ("$rule" + $(if ($slowSoft) { " ($slowSoft during one: soft)" } else { '' })) }
 }
 if ($Scenario -in 'probe', 'revive', 'pair-victim', 'pair-hostvictim') {
     Write-Host '--- answers ---'

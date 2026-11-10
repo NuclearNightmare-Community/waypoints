@@ -83,6 +83,19 @@ Expect ($revive + @(M "REBOUND pawn=$P3 was=$P2 (a new pawn without a HUD loss: 
 Expect ($revive + @(M 'ERROR restore failed: boom')) 'revive' 1 'revive: an ERROR line -> fails' 'ERROR'
 Expect ($revive + @(M 'WARN restore: could not update the map''s flags (boom)')) 'revive' 1 'revive: a WARN -> fails' 'WARN'
 Expect ($revive + @(M 'WARN hud slow tick 1.4 ms (steady state)')) 'revive' 0 'revive -Target vm: a steady slow tick is soft' 'warn:' 'vm'
+# Core's slow tick on the host (the real format): hard in steady state, soft during a map arrival (WORLD/TOUCHDOWN to HUD)
+# or with a Lua GC step inside it (V8.2.1 revive, 2026-11-09: one 2208 us poll during the landing showcase).
+$slow = M 'WARN hud slow tick 2208 us (poll 2202 us, watchers 6 us; steady state)'
+$arrival = @((Dr 'WORLD match1 /Game/Maps/SmallLoweIsland/SmallMap.SmallMap'), (Dr 'TOUCHDOWN match1 requesting Enter'),
+    (Dr 'VIEW match1 the camera is Helicopter_BP_Showcase_Landing_C''s (5.6 s after the HUD)'))
+$hudUp = Dr "HUD match1 pawn=$P1 (the pawn's camera since 15.0 s; before it: Helicopter_BP_Showcase_Landing_C)"
+$head, $tail = $revive[0..9], $revive[10..($revive.Count - 1)]
+Expect ($head + $arrival + @($slow, $hudUp) + $tail) 'revive' 0 'revive: a steady slow tick during the map arrival is soft' 'during one: soft'
+Expect ($head + $arrival + @($hudUp, $slow) + $tail) 'revive' 1 'revive: a steady slow tick after the HUD -> fails' 'outside a map arrival'
+Expect ($revive + @($slow)) 'revive' 1 'revive: a steady slow tick with no arrival -> fails' 'outside a map arrival'
+Expect ($revive + @(M 'WARN hud slow tick 1800 us (poll 1790 us, watchers 10 us; steady state, a Lua GC step ran inside it)')) 'revive' 0 'revive: a slow tick with a GC step is soft' 'warn:'
+Expect ($revive + @(M 'WARN hud slow tick 1800 us (poll 1000 us, watchers 800 us; HUD event: attached)')) 'revive' 0 'revive: a slow HUD-event tick is soft' 'warn:'
+Expect ($head + $arrival + @($slow, $hudUp) + $tail) 'revive' 0 'revive -Target vm: an arrival slow tick is soft' 'warn:' 'vm'
 Expect ($revive + @(U 'stack traceback:')) 'revive' 1 'revive: a traceback -> fails' 'stack traceback'
 Expect ($revive -replace 'END result=PASS', 'END result=FAIL') 'revive' 1 'revive: driver END FAIL -> fails' 'END result=PASS'
 Expect ($revive + @(Dr 'FAIL BOUND revive1 every location waypoint''s Character is the new pawn')) 'revive' 1 'revive: a driver FAIL -> fails' 'FAIL'

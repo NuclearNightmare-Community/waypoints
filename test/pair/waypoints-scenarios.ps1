@@ -62,6 +62,15 @@ function Get-WaypointsCheck([string] $Log, [string] $Scenario, [ValidateSet('hos
     [ordered]@{ Scenario = $Scenario; Verdict = $(if ($LASTEXITCODE -eq 0) { 'PASS' } else { 'FAIL' }); Failures = @($out -split "`r?`n" | Where-Object { $_ -match '^FAIL' }) }
 }
 
+# A run where B never joined judged nothing of Waypoints: pair.ps1 still fetches the VM's UE4SS.log, which is then the
+# previous run's (2026-11-09 18:05, host Steam logged off: no lobby, the VM's game never started). Say so instead of
+# listing that log's misses as this run's. Returns $null when B joined.
+function Get-WaypointsNotJoined {
+    if ($result -and -not $result.Joined) {
+        [ordered]@{ Verdict = 'FAIL'; Note = "not judged: B never joined (pair outcome: $($result.Outcome)); no Waypoints result from this run" }
+    }
+}
+
 $script:WaypointsPairScenarios = @{
     'mk-client' = @{
         Summary = 'Waypoints: B (client, modded) marks 2 flags + satellite, A (host, WaypointsDriver only) signals B''s kill (B calls CallDamageEvent(1000) on its own pawn; A does it 30 s later if B still lives) and reinforces it via the radio; B''s waypoints must come back'
@@ -101,6 +110,7 @@ $script:WaypointsPairScenarios = @{
         }
         PlaySec = 60; LobbyMinutes = 1
         Check = {
+            $nj = Get-WaypointsNotJoined; if ($nj) { return $nj }
             $r = [ordered]@{ Victim = (Get-WaypointsCheck $vmLogPath 'pair-victim' -Target vm); Host = (Get-WaypointsCheck (Join-Path $outDir "$Label.host.UE4SS.log") 'pair-host') }
             $r.Verdict = if ($r.Victim.Verdict -eq 'PASS' -and $r.Host.Verdict -eq 'PASS') { 'PASS' } else { 'FAIL' }
             $r
@@ -119,6 +129,7 @@ $script:WaypointsPairScenarios = @{
         }
         PlaySec = 60; LobbyMinutes = 1
         Check = {
+            $nj = Get-WaypointsNotJoined; if ($nj) { return $nj }
             $r = [ordered]@{ HostVictim = (Get-WaypointsCheck (Join-Path $outDir "$Label.host.UE4SS.log") 'pair-hostvictim') }
             $r.Verdict = $r.HostVictim.Verdict
             $r
