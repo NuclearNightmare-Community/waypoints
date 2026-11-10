@@ -18,7 +18,10 @@
     old-core: sets the installed Nucleus mod.json version to 0.1.0 (the driver publishes it as core's runtime version,
               since a real 0.1.0 core has no UI helpers to build).
   Both first check that deploy.ps1 refuses without -Force (story 1 AC 2 and 3), then deploy with -Force.
-  Keeps the log as <workspace>/dumps/<copy>/waypoints/<scenario>.log (ignored by git) and runs check.ps1 on it.
+  -Map <key> (LowIsland, TowerIsland, Forest, Crevasse) picks the match map: passed to deploy.ps1 -Map (the driver's
+  map.txt, a key of its fixed table); without it the driver's default, Tower Island.
+  Keeps the log as <workspace>/dumps/<copy>/waypoints/<scenario>.log, or <scenario>-<map>.log with -Map (ignored by
+  git), and runs check.ps1 on it.
   Refuses to start while another runner's test or driver mod is enabled in the copy (the workspace's tools/run-guard:
   the refusal names each and the command that clears it); -AllowOtherDrivers runs anyway.
   Core must already be installed (Nucleus's own deploy.ps1). Steam must be running. Don't type into the game while
@@ -34,11 +37,13 @@
 .EXAMPLE
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario revive
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario probe -Target vm
+  ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2-build26512322 -Scenario buttons -Map Crevasse
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [ValidateSet('probe', 'revive', 'death', 'buttons', 'no-core', 'old-core')]
     [string] $Scenario = 'revive',
+    [ValidateSet('', 'LowIsland', 'TowerIsland', 'Forest', 'Crevasse')] [string] $Map = '', # '': the driver's default (TowerIsland)
     [int] $TimeoutSec = 0, # 0: per scenario (probe 600, revive 720, buttons 600, others 480); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',
     [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
@@ -54,6 +59,7 @@ $inst     = (Resolve-Path $Instance).Path
 $root     = Split-Path (Split-Path $inst)
 . (Join-Path $root 'tools\run-guard\run-guard.ps1')
 $outDir   = Join-Path $root "dumps\$(Split-Path $inst -Leaf)\$($name.ToLowerInvariant())"
+$logBase  = if ($Map) { "$Scenario-$Map" } else { $Scenario } # the kept log's name
 # Where deploy.ps1 and Break-Core/Restore-Core work: the instance, or with -Target vm the host-side staging folder.
 function Set-DeployTarget([string] $instance) {
     $script:deployInst = $instance
@@ -139,6 +145,7 @@ function Invoke-Request([string] $cmd) {
 # deploy.ps1 ends with exit 1 when it refuses, so it always runs in its own pwsh.
 function Invoke-Deploy([string[]] $a) {
     if ($Target -eq 'vm') { $a += '-Staged' }
+    if ($Map -and $a -contains '-Test') { $a += @('-Map', $Map) }
     $out = & pwsh -NoProfile -NonInteractive -File (Join-Path $here 'deploy.ps1') -Instance $script:deployInst @a 2>&1 | Out-String
     return @{ Code = $LASTEXITCODE; Out = $out.Trim() }
 }
@@ -208,7 +215,7 @@ if ($Target -eq 'vm') {
     # Core comes from the host's own build/package, installed by core's own deploy.ps1 (never built here).
     $coreDeploy = Join-Path $root "mods\$CoreName\deploy.ps1"
     if (-not (Test-Path $coreDeploy)) { throw "$CoreName's deploy.ps1 not found at $coreDeploy (the VM run installs core from its build/package)." }
-    $kept = Join-Path $outDir "$Scenario.vm.log"
+    $kept = Join-Path $outDir "$logBase.vm.log"
     Remove-Item $kept -ErrorAction SilentlyContinue
     # A refusal of the guard (the VM copy's mods.txt, in the stage) ends the run before anything is installed there.
     try {
@@ -273,7 +280,7 @@ try {
     Restore-Core
 }
 
-$kept = Join-Path $outDir "$Scenario.log"
+$kept = Join-Path $outDir "$logBase.log"
 if (Test-Path $log) { Copy-Item $log $kept -Force } else { Write-Host "No UE4SS.log at $log" }
 & pwsh -NoProfile -NonInteractive -File (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario
 $code = $LASTEXITCODE

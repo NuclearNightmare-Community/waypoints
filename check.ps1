@@ -8,7 +8,8 @@
   Then the scenario's computed checks: READY after CONNECT ok; LOST before the first REVIVE; every REVIVE, REBOUND and
   AGAIN followed by its RESTORED or CLEARED line before the next one; for buttons, MARKALL's marked and flags equal the
   driver's EXPECT line (the map's distinct flag names minus the 2 marked by hand, plus 1 for a satellite flag) and a
-  MAPSYNC after CLEARALL (the reopen); and for probe, the story 2 answers.
+  MAPSYNC after CLEARALL (the reopen), and MARKALL's flags equal the driver's MAP line (its table's count for the map
+  the run travelled to); and for probe, the story 2 answers.
   Exit code 1 when any check fails; otherwise prints "All checks passed."
   Scenarios (run.ps1 drives them): probe, revive, death, buttons, no-core, old-core. Pair scenarios (tools/vm/pair.ps1 with
   test/pair/waypoints-scenarios.ps1): pair-victim and pair-hostvictim judge the modded player's log, pair-host the host's
@@ -113,6 +114,8 @@ $expect = @{
         "\[$C\] PAWN first "
         $noAction
         "\[$D\] OK MARKED mark 2 waypoints", "\[$D\] OK MAPKEY ", "\[$D\] EXPECT buttons marked=\d+ flags=\d+ satellite=(yes|no) "
+        # The map the run travelled to (-Map, default Tower Island), its flag count from the driver's table.
+        "#1|\[$D\] MAP \w+ /Game/Maps/\S+ flags=\d+\s*$", "\[$D\] OK FLAGCOUNT "
         # Mark all: one press, the 2 flags marked by hand already up, nothing failed; the world agrees (driver).
         "#1|\[$C\] MARKALL "
         "\[$C\] MARKALL marked=\d+ already=2 failed=0 waypoints=\d+ flags=\d+ satellite=(yes|none)\s*$"
@@ -152,6 +155,12 @@ $expect = @{
         "\[$C\] REVIVE pawn=.* snapshot=3 onRevive=restore\s*$"
         "\[$C\] RESTORED n=3 .*failed 0"
         "\[$D\] VICTIM ready marked="
+        # Mark all / Clear all on the client after the revive (its 3 waypoints already up), each pressed through
+        # core's <Core>_OnClicked (not an OS click); the world checks as in buttons.
+        "\[$D\] BPRESS markAll via ${K}_OnClicked ok=true", "\[$D\] BPRESS clearAll via ${K}_OnClicked ok=true"
+        "#1|\[$C\] MARKALL ", "\[$C\] MARKALL marked=\d+ already=3 failed=0 "
+        "#1|\[$C\] CLEARALL ", "\[$C\] CLEARALL cleared=\d+ direct=\d+ failed=0 waypoints=0 "
+        "\[$D\] OK ALLMARKED pair ", "\[$D\] OK ALLSELECTED pair ", "\[$D\] OK ALLCLEARED pair ", "\[$D\] OK NONESELECTED pair "
     ) + (Get-RestoredChecks 'revive') + (Get-DeathChecks 'victim')
     'pair-hostvictim' = $driven + @(
         "\[$C\] LOST pawn=.* snapshot n=3 "
@@ -163,6 +172,8 @@ $expect = @{
         "\[$D\] REINFORCE radio:Reinformant\(\) ok=true"
         "\[$D\] OK SPECTATOR victim "
         "\[$D\] OK REVIVED "
+        # CAP-3: the unmodded host's own waypoint, untouched by the client's revive, Mark all and Clear all.
+        "\[$D\] OK MARKED host 1 waypoints", "\[$D\] OK UNAFFECTED host "
         "\[$D\] END result=PASS"
         "!\[$D\] VICTIM after death pawn class=BP_ThirdPersonCharacter_C"
         # The victim kills itself (its own CallDamageEvent RPC); the host's kill 30 s later is the fallback, said.
@@ -243,6 +254,14 @@ if ($Scenario -eq 'buttons') {
     $is = -1; for ($i = [Math]::Max($ic, 0); $i -lt $lines.Count; $i++) { if ($ic -ge 0 -and $lines[$i] -match "\[$C\] MAPSYNC ") { $is = $i; break } }
     if ($im -ge 0 -and $ic -gt $im -and $is -gt $ic) { Pass 'MARKALL, then CLEARALL, then a MAPSYNC (the reopen)' }
     else { Fail "MARKALL, then CLEARALL, then a MAPSYNC (MARKALL at line $im, CLEARALL at $ic, MAPSYNC after it at $is)" }
+    # The map's count from the driver's table (the SPEC's 10/6/7/9) is what Mark all saw.
+    $mp = $lines | Where-Object { $_ -match "\[$D\] MAP \w+ \S+ flags=\d+" } | Select-Object -First 1
+    if ($mp -and $mk) {
+        $null = $mp -match "MAP (\w+) \S+ flags=(\d+)"; $mkey, $mf = $Matches[1], [int]$Matches[2]
+        $null = $mk -match ' flags=(\d+) '; $gf2 = [int]$Matches[1]
+        $rule = "MARKALL flags=$gf2 is $mkey's $mf"
+        if ($gf2 -eq $mf) { Pass $rule } else { Fail $rule }
+    } else { Fail 'MARKALL flags is the map''s count (no MAP or MARKALL line)' }
 }
 if ($Scenario -in 'probe', 'revive', 'pair-victim', 'pair-hostvictim') {
     Write-Host '--- answers ---'

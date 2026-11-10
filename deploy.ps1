@@ -13,6 +13,9 @@
   -Test also installs the test driver (test/WaypointsDriver as Mods/WaypointsDriver, between Nucleus and Waypoints), writes
   the scenario to its Scripts/scenario.txt, and turns on Waypoints' DEBUG lines (settings.lua debug = true), which
   check.ps1 reads. The driver is never shipped.
+  -Map (with -Test) writes the solo scenarios' match map to the driver's Scripts/map.txt: only a key of the driver's
+  fixed table (LowIsland, TowerIsland, Forest, Crevasse); without -Map there is no map.txt (the driver's default,
+  Tower Island). Every test deploy removes a stale map.txt first. -Map without -Test writes nothing (a warning).
   -Remove deletes Mods/Waypoints, Mods/WaypointsDriver and their mods.txt lines; nothing else changes (mods.txt keeps its
   bytes when it had no Waypoints lines).
   -Staged: $Instance is the host-side staging folder of a VM run (run.ps1 -Target vm, tools/vm/vm-sp.ps1), not a game
@@ -22,6 +25,7 @@
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -OnRevive clear
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Test -Scenario revive
+  ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2-build26512322 -Test -Scenario buttons -Map Forest
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Remove
 #>
 param(
@@ -29,6 +33,7 @@ param(
     [switch] $Test,
     [ValidateSet('probe', 'revive', 'death', 'buttons', 'no-core', 'old-core', 'pair-victim', 'pair-host', 'pair-hostvictim')]
     [string] $Scenario = 'revive',
+    [ValidateSet('', 'LowIsland', 'TowerIsland', 'Forest', 'Crevasse')] [string] $Map = '',  # '': the driver's default (TowerIsland)
     [ValidateSet('', 'restore', 'clear')] [string] $OnRevive = '',  # '': mod.json's default
     [switch] $Force,
     [switch] $Remove,
@@ -110,16 +115,18 @@ foreach ($f in $files) { Copy-Item (Join-Path $here "Scripts\$f") $dest -Force }
 # mods.txt: below core, above Keybinds. The driver goes between core and Waypoints (its old-core mode must run before
 # Waypoints' main.lua).
 $add = @($name)
+if ($Map -and -not $Test) { Write-Warning "-Map $Map needs -Test (it picks the test driver's map); ignored." }
 if ($Test) {
     Copy-Item (Join-Path $here 'test\WaypointsDriver') (Join-Path $modsDir $driver) -Recurse -Force
-    foreach ($f in 'scenario.txt', 'request.txt', 'done.txt') { Remove-Item (Join-Path $modsDir "$driver\Scripts\$f") -ErrorAction SilentlyContinue }
+    foreach ($f in 'scenario.txt', 'map.txt', 'request.txt', 'done.txt') { Remove-Item (Join-Path $modsDir "$driver\Scripts\$f") -ErrorAction SilentlyContinue }
     [IO.File]::WriteAllText((Join-Path $modsDir "$driver\Scripts\scenario.txt"), $Scenario)
+    if ($Map) { [IO.File]::WriteAllText((Join-Path $modsDir "$driver\Scripts\map.txt"), $Map) }
     $add = @($driver, $name)
 }
 $lines = Edit-ModsTxt -Lines $clean -Add $add -After $CoreName
 Write-ModsTxt $modsTxt $file $lines
 
-Write-Host "$name $($manifest.version) deployed$(if ($Test) { " with $driver (scenario $Scenario)" }):"
+Write-Host "$name $($manifest.version) deployed$(if ($Test) { " with $driver (scenario $Scenario$(if ($Map) { ", map $Map" }))" }):"
 Get-ChildItem (Join-Path $modsDir $name) -Recurse -File | ForEach-Object { Write-Host "  Mods/$name/$($_.FullName.Substring((Join-Path $modsDir $name).Length + 1)) ($($_.Length) bytes)" }
 Write-Host "  settings.lua: $(($settings -split "`n")[1])"
 Write-Host "mods.txt: $(($lines | Where-Object { $_ -match '^\s*[\w-]+\s*:\s*1' }) -join ', ')"

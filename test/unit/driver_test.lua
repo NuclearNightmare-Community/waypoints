@@ -53,5 +53,39 @@ os.remove(scenarioFile)
 local ended = false
 for _, l in ipairs(printed) do if l:find("END result=FAIL .*unknown%-scenario bogus") then ended = true end end
 ok(ended and #loops == 0, "unknown scenario: END FAIL, no loop")
+-- Story 4: map.txt holds only a key of the driver's fixed table; each key loads and logs its MAP line, a bad key fails
+-- the run before any travel (no loop), and no map.txt is Tower Island.
+local mapFile = DIR .. "/map.txt"
+local function load(sc, key)
+    printed, loops = {}, {}
+    local f1 = assert(io.open(scenarioFile, "w")); f1:write(sc); f1:close()
+    os.remove(mapFile)
+    if key then local f2 = assert(io.open(mapFile, "w")); f2:write(key); f2:close() end
+    local okL, err = pcall(dofile, MAIN)
+    os.remove(mapFile); os.remove(scenarioFile)
+    return okL, err
+end
+local function line(pat) for _, l in ipairs(printed) do if l:find(pat) then return l end end return nil end
+local WANT = {
+    LowIsland = "/Game/Maps/Gameplay flags=10", TowerIsland = "/Game/Maps/SmallLoweIsland/SmallMap flags=6",
+    Forest = "/Game/Maps/ForestMap/ForestMap flags=7", Crevasse = "/Game/Maps/CravasseMapV2/CravasseMap flags=9",
+}
+for key, want in pairs(WANT) do
+    local okL, err = load("buttons", key .. "\r\n")
+    ok(okL, "map " .. key .. ": loads", err)
+    ok(line("^%[WaypointsDriver%] MAP " .. key .. " " .. want:gsub("%p", "%%%0") .. "$") ~= nil, "map " .. key .. ": MAP line", line("%] MAP "))
+    ok(#loops == 1 and line("LOADED %d+ steps") ~= nil, "map " .. key .. ": builds steps and one loop")
+    for _ = 1, 5 do local okT, e = pcall(loops[1].fn); ok(okT, "map " .. key .. ": tick runs", e) end
+end
+load("buttons", nil)
+ok(line("^%[WaypointsDriver%] MAP TowerIsland /Game/Maps/SmallLoweIsland/SmallMap flags=6$") ~= nil, "no map.txt: Tower Island", line("%] MAP "))
+load("pair-victim", "Forest")
+ok(line("%] MAP ") == nil and #loops == 1, "pair role: no MAP line (PairDriver's map)")
+for _, bad in ipairs({ "../x", "/Game/Maps/Gameplay", "forest", "TowerIsland2", "" }) do
+    load("buttons", bad)
+    ok(line("^%[WaypointsDriver%] FAIL MAP unknown map key") ~= nil, "bad key '" .. bad .. "': FAIL MAP", line("MAP"))
+    ok(line("END result=FAIL .*reason=unknown%-map") ~= nil and #loops == 0, "bad key '" .. bad .. "': END FAIL, no loop (no travel)")
+    ok(line("LOADED") == nil, "bad key '" .. bad .. "': no steps built")
+end
 os.remove(DIR .. "/request.txt"); os.remove(DIR .. "/done.txt")
 H.done()

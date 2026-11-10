@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Waypoints' two-player scenarios for tools/vm/pair.ps1 (the workspace's pair tooling): the real revive, which a solo
-  player can't have (the last player's death ends the match). Run on 2026-10-27: mk-client and mk-host PASS (README, "Results").
+  player can't have (the last player's death ends the match). Results in the README, "Results".
 .DESCRIPTION
   A -ScenarioFile for pair.ps1: dot-sourced by it after its own pair-scenarios.ps1, in the same shape (Summary,
   Prereq, VMSetup, VMRestore, BeforeJoin, AfterJoin, PlaySec, LobbyMinutes, Check, HostModPaths), and adds mk-client
@@ -14,8 +14,11 @@
   Roles (test/WaypointsDriver scenario.txt):
     mk-client  B (VM, client) = Nucleus + Waypoints + WaypointsDriver "pair-victim": marks two flags and the satellite,
                dies on the host's signal (kill.txt; CallDamageEvent(1000) on its own pawn, the host's own CallDamageEvent(1000)
-               on B if B is still alive 30 s later), revived through the host's radio; then the revive checks on B.
-               A (host) = WaypointsDriver "pair-host" only (no Waypoints): a modded client of an unmodded host (CAP-3),
+               on B if B is still alive 30 s later), revived through the host's radio; then the revive checks on B, then
+               Mark all and Clear all on B's map (opened from Lua; each button pressed through core's Nucleus_OnClicked,
+               the function the button's OnClicked calls: not an OS click, nothing serves clicks in a pair run).
+               A (host) = WaypointsDriver "pair-host" only (no Waypoints): a modded client of an unmodded host (CAP-3):
+               A marks one flag of its own first and checks it untouched at the end (UNAFFECTED host),
                and the kill signal and the reinforcement: BP_Radio_C:Reinformant(), the computer's
                "call reinforcement" (it picks SpawnReinforcementMethod2 when the dead player is queued, else the
                spectator path), called from Lua on the host, where the radio has authority.
@@ -73,7 +76,7 @@ function Get-WaypointsNotJoined {
 
 $script:WaypointsPairScenarios = @{
     'mk-client' = @{
-        Summary = 'Waypoints: B (client, modded) marks 2 flags + satellite, A (host, WaypointsDriver only) signals B''s kill (B calls CallDamageEvent(1000) on its own pawn; A does it 30 s later if B still lives) and reinforces it via the radio; B''s waypoints must come back'
+        Summary = 'Waypoints: B (client, modded) marks 2 flags + satellite, A (host, WaypointsDriver only) marks 1 flag of its own and signals B''s kill (B calls CallDamageEvent(1000) on its own pawn; A does it 30 s later if B still lives) and reinforces it via the radio; B''s waypoints must come back, B''s Mark all / Clear all (pressed via Nucleus_OnClicked) pass, and A''s own waypoint is untouched'
         Prereq = {
             # The host stays unmodded but for the driver (CAP-3): no Waypoints or core of its own in the host copy.
             $own = @('Waypoints', 'Nucleus' | Where-Object { Test-Path (Join-Path $modsDir $_) }) + @('Nucleus.pak' | Where-Object { Test-Path (Join-Path $inst "NuclearNightmare\Content\Paks\LogicMods\$_") })
@@ -107,6 +110,9 @@ $script:WaypointsPairScenarios = @{
             Save-ShotAt -Seconds 20 -Name 'dead' -Expect 'B dead (spectator view or death screen)'
             Wait-HostLine '\[WaypointsDriver\] OK REVIVED ' 300 | Out-Null; $script:LastAction = @{ Name = 'host OK REVIVED'; Time = Get-Date }   # shots count from the last action
             Save-ShotAt -Seconds 10 -Name 'revived' -Expect 'B revived: the same 3 waypoints on screen with distances, white (bound to the live pawn)'
+            # B's Mark all / Clear all run within the host's 90 s wait after OK REVIVED; the host's own check comes after it.
+            Wait-HostLine '\[WaypointsDriver\] (OK|FAIL) UNAFFECTED host ' 180 | Out-Null; $script:LastAction = @{ Name = 'host UNAFFECTED'; Time = Get-Date }
+            Save-ShotAt -Seconds 1 -Name 'buttons' -Expect 'B after its Mark all and Clear all: no waypoint on screen, map closed'
         }
         PlaySec = 60; LobbyMinutes = 1
         Check = {

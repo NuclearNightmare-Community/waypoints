@@ -10,3 +10,4 @@ test/WaypointsDriver/Scripts/scenario.txt
 test/WaypointsDriver/Scripts/request.txt
 test/WaypointsDriver/Scripts/done.txt
 test/WaypointsDriver/Scripts/kill.txt
+test/WaypointsDriver/Scripts/map.txt
