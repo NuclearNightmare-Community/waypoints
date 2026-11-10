@@ -180,8 +180,8 @@ local function stillAlive(G, actors)
 end
 
 -- Clear all: every live waypoint actor goes. A flag's click destroys only the first actor with its name, so the flag is
--- clicked once per live actor of its key (never more: each click must remove one, else the clicking stops, so a
--- click can't put a new waypoint up). An actor still alive afterwards, or one whose flag isn't on this map, is
+-- clicked once per live actor of its key, never more. Each click must remove one, else the clicking stops: so at most
+-- one click per flag can remove nothing (it may put a new waypoint up), and it is reported as failed. An actor still alive afterwards, or one whose flag isn't on this map, is
 -- destroyed directly. Then every flag's Selected follows the actors.
 -- Returns { cleared, direct, failed, waypoints, flags } or nil (logged).
 function M.clearAll(G, journal, log)
