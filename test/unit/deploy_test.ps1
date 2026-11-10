@@ -242,6 +242,8 @@ try {
     Ok ($d.Code -eq 0 -and -not (Test-Path $mapTxt)) 'deploy -Test: a stray map.txt removed' $d.Out
     $d = Deploy @('-Test', '-Scenario', 'buttons', '-Map', '../x')
     Ok ($d.Out -match 'does not belong to the set' -and -not (Test-Path $mapTxt)) 'deploy -Map ../x: refused by the parameter' $d.Out
+    $d = Deploy @('-Test', '-Scenario', 'buttons', '-Map', 'forest')
+    Ok ($d.Out -match 'does not belong to the set' -and -not (Test-Path $mapTxt)) 'deploy -Map forest: wrong case refused by the parameter' $d.Out
     $d = Deploy @('-Map', 'Forest')
     Ok ($d.Code -eq 0 -and $d.Out -match 'needs -Test' -and -not (Test-Path (Join-Path $mods 'WaypointsDriver'))) 'deploy -Map without -Test: warns, writes nothing' $d.Out
     $d = Deploy @('-Test', '-Scenario', 'pair-victim', '-Staged')

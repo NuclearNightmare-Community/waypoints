@@ -32,7 +32,7 @@
   game is launched, Enter and the map key are pressed there with tools/vm/vm-key.ps1 and clicks made with
   tools/vm/vm-click.ps1, and the VM copy is put back as it was
   afterwards. It never builds and never touches the host's game copy or a host game, so it can run while someone
-  plays on the host. The log is kept as <scenario>.vm.log and judged with check.ps1 -Target vm.
+  plays on the host. The log is kept as <scenario>.vm.log, or <scenario>-<map>.vm.log with -Map, and judged with check.ps1 -Target vm.
   Every Waypoints scenario runs in the VM too (none judges timing).
 .EXAMPLE
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario revive
@@ -43,7 +43,7 @@ param(
     [Parameter(Mandatory)] [string] $Instance,
     [ValidateSet('probe', 'revive', 'death', 'buttons', 'no-core', 'old-core')]
     [string] $Scenario = 'revive',
-    [ValidateSet('', 'LowIsland', 'TowerIsland', 'Forest', 'Crevasse')] [string] $Map = '', # '': the driver's default (TowerIsland)
+    [ValidateSet('', 'LowIsland', 'TowerIsland', 'Forest', 'Crevasse', IgnoreCase = $false)] [string] $Map = '', # '': the driver's default (TowerIsland)
     [int] $TimeoutSec = 0, # 0: per scenario (probe 600, revive 720, buttons 600, others 480); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',
     [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
@@ -189,6 +189,15 @@ function Break-Core {
 
 # The scenario's deploy: no-core and old-core first break core and check that deploy.ps1 refuses without -Force.
 $script:runFailures = @()
+# With -Map every solo scenario's driver logs "MAP <key> ...": without that line the run didn't go to the asked map.
+function Test-MapTravelled([string] $logFile) {
+    if (-not $Map) { return }
+    $line = "[$driver] MAP $Map "
+    if (-not ((Test-Path $logFile) -and (Select-String -Path $logFile -SimpleMatch -CaseSensitive -Pattern $line -Quiet))) {
+        Write-Host "FAIL: the log has no '$line' line (the run did not travel to $Map)"
+        $script:runFailures += "map $Map"
+    } else { Write-Host "ok:   the run travelled to $Map ('$line')" }
+}
 function Deploy-Scenario {
     if ($Scenario -in 'no-core', 'old-core') {
         Break-Core
@@ -235,6 +244,7 @@ if ($Target -eq 'vm') {
         & pwsh -NoProfile -NonInteractive -File (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario -Target vm
         $code = $LASTEXITCODE
     } else { Write-Host 'No UE4SS.log from the VM.'; $code = 1 }
+    Test-MapTravelled $kept
     if ($script:runFailures) { Write-Host "run.ps1 check(s) failed: $($script:runFailures -join ', ')"; $code = 1 }
     exit $code
 }
@@ -284,5 +294,6 @@ $kept = Join-Path $outDir "$logBase.log"
 if (Test-Path $log) { Copy-Item $log $kept -Force } else { Write-Host "No UE4SS.log at $log" }
 & pwsh -NoProfile -NonInteractive -File (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario
 $code = $LASTEXITCODE
+Test-MapTravelled $kept
 if ($script:runFailures) { Write-Host "run.ps1 check(s) failed: $($script:runFailures -join ', ')"; $code = 1 }
 exit $code
