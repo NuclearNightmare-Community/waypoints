@@ -6,9 +6,12 @@
   Launches only through the workspace's tools/launch.ps1 (which passes -userdir). Stops when the driver logs its END
   line, the game exits (crash), or -TimeoutSec runs out (hang); then closes the game, force-killing it (and any crash
   reporter) after 15 s. Only ever stops the Shipping exe under this instance, never the real install or another copy.
-  The driver writes "<seq> key ENTER" to its Scripts/request.txt for touchdown; this script posts the key to the
-  game window's message queue (PostMessage WM_KEYDOWN/WM_KEYUP: no foreground change, no global input), then writes
-  <seq> to done.txt.
+  The driver writes "<seq> key ENTER" to its Scripts/request.txt for touchdown (and "<seq> key <A-Z>" for the map key
+  in the buttons scenario); this script posts the key to the game window's message queue (PostMessage
+  WM_KEYDOWN/WM_KEYUP: no foreground change, no global input), then writes <seq> to done.txt. "<seq> click <x> <y>"
+  (the buttons scenario: Mark all / Clear all on the Journal map) is a real mouse click at that desktop point, as
+  Nucleus's run.ps1 does it: the game window is brought to the front and clicked only while it is in front (it takes
+  the mouse for a moment; don't use the mouse while it runs).
   Scenarios that break core on purpose put it back afterwards, also after a crash or Ctrl+C (and at the start of the
   next run if this one was killed):
     no-core:  moves Mods/Nucleus to ue4ss/_waypoints-test-backup/ and takes its line out of mods.txt.
@@ -23,7 +26,8 @@
   -Target vm runs the scenario in the Hyper-V VM NNB instead (tools/vm/vm-sp.ps1, README "Tests in the VM"): Nucleus
   from the host's mods/Nucleus/build/package (its own deploy.ps1 -Staged), Waypoints and the driver (deploy.ps1
   -Staged, with the same refusal checks for no-core and old-core) go into the VM's copy of the same build, the VM's
-  game is launched, Enter is pressed there with tools/vm/vm-key.ps1, and the VM copy is put back as it was
+  game is launched, Enter and the map key are pressed there with tools/vm/vm-key.ps1 and clicks made with
+  tools/vm/vm-click.ps1, and the VM copy is put back as it was
   afterwards. It never builds and never touches the host's game copy or a host game, so it can run while someone
   plays on the host. The log is kept as <scenario>.vm.log and judged with check.ps1 -Target vm.
   Every Waypoints scenario runs in the VM too (none judges timing).
@@ -33,14 +37,14 @@
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('probe', 'revive', 'death', 'no-core', 'old-core')]
+    [ValidateSet('probe', 'revive', 'death', 'buttons', 'no-core', 'old-core')]
     [string] $Scenario = 'revive',
-    [int] $TimeoutSec = 0, # 0: per scenario (probe 600, revive 720, others 480); x1.5 in the VM
+    [int] $TimeoutSec = 0, # 0: per scenario (probe 600, revive 720, buttons 600, others 480); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',
     [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
 )
 $ErrorActionPreference = 'Stop'
-$hostTimeout = switch ($Scenario) { 'probe' { 600 } 'revive' { 720 } default { 480 } }
+$hostTimeout = switch ($Scenario) { 'probe' { 600 } 'revive' { 720 } 'buttons' { 600 } default { 480 } }
 if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $CoreName = 'Nucleus'
 $here     = $PSScriptRoot
@@ -66,7 +70,15 @@ New-Item -ItemType Directory -Force $outDir | Out-Null
 
 Add-Type -Namespace WaypointsRun -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint msg, System.IntPtr w, System.IntPtr l);
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
+[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, System.UIntPtr extra);
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, System.UIntPtr extra);
+[DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(System.IntPtr v);
 '@
+# Slate's absolute coordinates (the driver's click points) are physical desktop pixels: see the same pixels.
+[void][WaypointsRun.Win]::SetProcessDpiAwarenessContext([IntPtr](-4))
 
 function Get-OurGame { Get-Process -Name $exeName -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($inst, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1 }
 function Stop-Game {
@@ -76,16 +88,53 @@ function Stop-Game {
     $deadline = (Get-Date).AddSeconds(30)
     while ((Get-OurGame) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
 }
+# A real mouse click on the game only: the game window is brought to the front and clicked only when it is in front
+# (ported from Nucleus's run.ps1).
+function Invoke-Click([int] $x, [int] $y) {
+    $p = Get-OurGame
+    $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
+    if ($h -eq [IntPtr]::Zero) { Write-Host '  click skipped: no game window'; return }
+    if ([WaypointsRun.Win]::GetForegroundWindow() -ne $h) {
+        [WaypointsRun.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [WaypointsRun.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero) # an Alt tap lifts the foreground lock
+        [void][WaypointsRun.Win]::SetForegroundWindow($h)
+        Start-Sleep -Milliseconds 300
+    }
+    if ([WaypointsRun.Win]::GetForegroundWindow() -ne $h) { Write-Host '  click skipped: the game window is not in front'; return }
+    [void][WaypointsRun.Win]::SetCursorPos($x, $y)
+    Start-Sleep -Milliseconds 150
+    [WaypointsRun.Win]::mouse_event(0x0001, 1, 0, 0, [UIntPtr]::Zero); [WaypointsRun.Win]::mouse_event(0x0001, -1, 0, 0, [UIntPtr]::Zero) # hover
+    Start-Sleep -Milliseconds 150
+    if ([WaypointsRun.Win]::GetForegroundWindow() -ne $h) { Write-Host '  click skipped: the game window lost the front'; return }
+    [WaypointsRun.Win]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 80
+    [WaypointsRun.Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+    Write-Host "  clicked at ($x, $y)"
+}
+# 'key ENTER' (touchdown), 'key <A-Z>' (the buttons scenario's map key), 'click <x> <y>' (its buttons); anything else
+# is ignored.
 function Invoke-Request([string] $cmd) {
-    if ($cmd -eq 'key ENTER') {
-        $p = Get-OurGame
-        $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
-        if ($h -eq [IntPtr]::Zero) { Write-Host '  key skipped: no game window'; return }
-        $down = [WaypointsRun.Win]::PostMessage($h, 0x0100, [IntPtr]0x0D, [IntPtr]0x001C0001)            # WM_KEYDOWN, VK_RETURN, scan 0x1C
-        Start-Sleep -Milliseconds 80
-        $up = [WaypointsRun.Win]::PostMessage($h, 0x0101, [IntPtr]0x0D, [IntPtr]([int64]0xC01C0001))   # WM_KEYUP
-        Write-Host ("  posted ENTER to the game window (down={0} up={1})" -f $down, $up)
-    } else { Write-Host "  unknown request: $cmd" }
+    if ($cmd -cmatch '^click (\d{1,5}) (\d{1,5})$') {
+        $x = [int]$Matches[1]; $y = [int]$Matches[2]
+        if ($x -le 16383 -and $y -le 16383) { Invoke-Click $x $y } else { Write-Host "  click skipped: ($x, $y) out of range" }
+        return
+    }
+    $vk, $scan, $label = $null, $null, $null
+    if ($cmd -ceq 'key ENTER') { $vk, $scan, $label = 0x0D, 0x1C, 'ENTER' }
+    elseif ($cmd -cmatch '^key ([A-Z])$') {
+        $letter = $Matches[1]
+        # Set-1 scan codes of a US layout; the virtual key of a letter is its ASCII code.
+        $scans = @{ Q = 0x10; W = 0x11; E = 0x12; R = 0x13; T = 0x14; Y = 0x15; U = 0x16; I = 0x17; O = 0x18; P = 0x19
+            A = 0x1E; S = 0x1F; D = 0x20; F = 0x21; G = 0x22; H = 0x23; J = 0x24; K = 0x25; L = 0x26
+            Z = 0x2C; X = 0x2D; C = 0x2E; V = 0x2F; B = 0x30; N = 0x31; M = 0x32 }
+        $vk, $scan, $label = [int][char]$letter, $scans[$letter], $letter
+    }
+    if ($null -eq $vk) { Write-Host "  unknown request: $cmd"; return }
+    $p = Get-OurGame
+    $h = if ($p) { $p.MainWindowHandle } else { [IntPtr]::Zero }
+    if ($h -eq [IntPtr]::Zero) { Write-Host '  key skipped: no game window'; return }
+    $down = [WaypointsRun.Win]::PostMessage($h, 0x0100, [IntPtr]$vk, [IntPtr](1 -bor ($scan -shl 16)))                         # WM_KEYDOWN
+    Start-Sleep -Milliseconds 80
+    $up = [WaypointsRun.Win]::PostMessage($h, 0x0101, [IntPtr]$vk, [IntPtr]([int64]0xC0000001 -bor ([int64]$scan -shl 16)))    # WM_KEYUP
+    Write-Host ("  posted {0} to the game window (down={1} up={2})" -f $label, $down, $up)
 }
 # deploy.ps1 ends with exit 1 when it refuses, so it always runs in its own pwsh.
 function Invoke-Deploy([string[]] $a) {

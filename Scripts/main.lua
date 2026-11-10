@@ -1,11 +1,14 @@
--- Waypoints 0.1.0 (spec-markers-v1, story 2): after a revive, the map waypoints the player had up show their on-screen
--- waypoints again (onRevive = restore, the default), or every waypoint is cleared (onRevive = clear).
+-- Waypoints 0.2.0 (spec-markers-v1, stories 2 and 3): after a revive, the map waypoints the player had up show their
+-- on-screen waypoints again (onRevive = restore, the default), or every waypoint is cleared (onRevive = clear); and two
+-- buttons on the Journal map, Mark all and Clear all, put up or take down every flag's waypoint at once.
 -- Runs on Nucleus (core) through the dependent bootstrap (core's api-contract.md) and uses only core's public API:
--- connect, core.log, core.ui.hud.watch (HUD events), core.ref/deref/free (weak handles), core.clock.micros.
+-- connect, core.log, core.ui.hud.watch (HUD events), core.ui.panel / core.ui.button / core.ui.journal (the buttons on
+-- the map page and the map's open and close events), core.ref/deref/free (weak handles), core.clock.micros.
 -- Local only (scope client): the waypoint actors are local and unreplicated; no RPC, no chat, no replicated actor, and
 -- nothing read from another player. Holds no UObject between callbacks (AGENTS.md): revive.lua sees plain facts, the
--- deferred action re-finds the new pawn through a weak handle. No per-tick work: it acts on HUD events only.
-local CORE, NEED, ME = "Nucleus", ">=0.2.0", "Waypoints"
+-- deferred action re-finds the new pawn through a weak handle, and the open Journal crosses from its open event to a
+-- button press only as a weak handle. No per-tick work: it acts on HUD events, map opens and button presses only.
+local CORE, NEED, ME = "Nucleus", ">=0.5.0", "Waypoints"
 local DELAY_MS = 500 -- after the revive's HUD event, so the game has finished possessing the new pawn
 local SNAPSHOT_MS = 50 -- the snapshot at the death runs this much later, outside core's HUD tick (it costs about 2 ms)
 
@@ -20,6 +23,7 @@ if not ok then print(("[%s] %s is not installed. %s will not run.\n"):format(ME,
 
 local revive = require("revive")
 local waypoints = require("waypoints")
+local mapbuttons = require("mapbuttons")
 local game = require("game")
 
 -- ---------------------------------------------------------------- settings
@@ -40,6 +44,64 @@ local function loadSettings()
     return s, problem
 end
 local settings, settingsProblem = loadSettings()
+
+-- ---------------------------------------------------------------- Mark all and Clear all (story 3)
+-- A panel in the map page's bottom-right corner holding the two buttons, created before the Journal watcher so that on
+-- every open core attaches them before our `opened` runs. The open Journal is kept only as core's weak handle, taken on
+-- `opened` and freed on `closed`/`lost`; a press derefs it (nil: the map is not open). Returns true when set up; without
+-- core's panel, button or Journal API one ERROR line, and the revive fix keeps running.
+local function setupButtons(core, log)
+    local ui = type(core.ui) == "table" and core.ui or {}
+    local panel, button, journal = ui.panel, ui.button, ui.journal
+    if not (type(panel) == "table" and type(panel.create) == "function" and type(button) == "table" and type(button.create) == "function"
+            and type(journal) == "table" and type(journal.watch) == "function" and type(core.ref) == "function" and type(core.deref) == "function") then
+        log.error("%s's panels, buttons or Journal events (core.ui.panel, core.ui.button, core.ui.journal) are not available: no Mark all / Clear all. The revive fix still runs.", CORE)
+        return false
+    end
+    local handle -- the open Journal's weak handle, or nil
+    local function free()
+        if handle ~= nil then local h = handle; handle = nil; pcall(core.free, h) end
+    end
+    local function press(action, label)
+        local okP, err = pcall(function()
+            local j
+            if handle ~= nil then
+                local okD, x = pcall(core.deref, handle)
+                if okD and x ~= nil and game.alive(x) then j = x end
+            end
+            if j == nil then log.warn("%s skipped: the map is not open", label) return end
+            action(game, j, log)
+        end)
+        if not okP then log.error("%s failed: %s", label, tostring(err)) end
+    end
+    local p -- the panel's handle, removed again (with whatever got into it) when the setup fails half way
+    local okS, err = pcall(function()
+        p = panel.create{ id = "waypoints", place = { host = "journal", corner = "bottom-right" }, layout = "horizontal" }
+        button.create{ id = "markAll", label = "Mark all", place = { panel = p }, onClick = function() press(mapbuttons.markAll, "Mark all") end }
+        button.create{ id = "clearAll", label = "Clear all", place = { panel = p }, onClick = function() press(mapbuttons.clearAll, "Clear all") end }
+        journal.watch(function(j, info)
+            local okW, e = pcall(function()
+                local event = type(info) == "table" and info.event or nil
+                if event == "opened" then
+                    free()
+                    if j == nil then return end
+                    local okR, h = pcall(core.ref, j)
+                    if okR then handle = h else log.warn("map open: could not take a handle on the Journal (%s)", tostring(h)) end
+                    mapbuttons.syncOnOpen(game, j, log)
+                elseif event == "closed" or event == "lost" then
+                    free()
+                end
+            end)
+            if not okW then log.error("map event failed: %s", tostring(e)) end
+        end)
+    end)
+    if not okS then
+        if p ~= nil and type(panel.remove) == "function" then pcall(panel.remove, p) end
+        log.error("could not set up Mark all / Clear all on the map: %s. The revive fix still runs.", tostring(err))
+        return false
+    end
+    return true
+end
 
 -- ---------------------------------------------------------------- the revive fix (story 2)
 local function start(core)
@@ -156,7 +218,8 @@ local function start(core)
     if not okW then log.error("could not watch the HUD: %s. %s will not run.", tostring(token), ME) return end
     -- A map change destroys every waypoint actor with the old world: forget the old pawn and snapshot.
     pcall(RegisterLoadMapPostHook, function() R:loadMap() end)
-    log.info("READY onRevive=%s", settings.onRevive)
+    local buttons = setupButtons(core, log)
+    log.info("READY onRevive=%s buttons=%s", settings.onRevive, buttons and "yes" or "no")
 end
 
 client.connect{

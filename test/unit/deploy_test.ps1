@@ -110,12 +110,12 @@ Eq $m.settings.onRevive.label 'After a revive, your map waypoints' 'mod.json: th
 Eq $m.settings.onRevive.changeable 'anytime' 'mod.json: changeable anytime'
 Eq (@($m.settings.onRevive.values) -join ',') 'restore,clear' 'mod.json: values restore, clear'
 Eq $m.settings.onRevive.default 'restore' 'mod.json: default restore'
-Ok ($m.id -eq 'waypoints' -and $m.name -eq 'Waypoints' -and $m.version -eq '0.1.0' -and $m.scope -eq 'client') 'mod.json: id, name, version, scope'
-Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '>=0.2.0') 'mod.json: dependsOn nucleus >=0.2.0 (a minimum, core story 18)'
-Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.1.2' -and $m.game.build -eq '26193463') 'mod.json: ue4ss and game build'
+Ok ($m.id -eq 'waypoints' -and $m.name -eq 'Waypoints' -and $m.version -eq '0.2.0' -and $m.scope -eq 'client') 'mod.json: id, name, version 0.2.0, scope'
+Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '>=0.5.0') 'mod.json: dependsOn nucleus >=0.5.0 (a minimum, core story 18; the panels and buttons it is verified on)'
+Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.2.1' -and $m.game.build -eq '26512322') 'mod.json: ue4ss and game build (V8.2.1 / 26512322)'
 # The runtime need in main.lua equals dependsOn's minimum.
 $mainLua = Get-Content (Join-Path $repo 'Scripts\main.lua') -Raw
-Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", ">=0.2.0", "Waypoints"') 'main.lua: need = dependsOn (>=0.2.0)'
+Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", ">=0.5.0", "Waypoints"') 'main.lua: need = dependsOn (>=0.5.0)'
 
 # ---------------------------------------------------------------- mods.txt bytes
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("waypoints-deploy-test-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -170,16 +170,19 @@ try {
     [IO.File]::WriteAllText($modsTxt, $coreTxt)
     Set-Core '0.1.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.1\.0 is installed, but Waypoints needs >=0\.2\.0; update Nucleus\.') 'deploy: core 0.1.0 -> refused, naming both versions' $d.Out
+    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.1\.0 is installed, but Waypoints needs >=0\.5\.0; update Nucleus\.') 'deploy: core 0.1.0 -> refused, naming both versions' $d.Out
     Set-Core '0.4.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 0) 'deploy: core 0.4.0 (a newer minor) -> installed' $d.Out
+    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.4\.0 is installed, but Waypoints needs >=0\.5\.0; update Nucleus\.') 'deploy: core 0.4.0 (no panels on 0.5.0''s terms) -> refused' $d.Out
+    Set-Core '0.6.0'
+    $d = Deploy @()
+    Ok ($d.Code -eq 0) 'deploy: core 0.6.0 (a newer minor) -> installed' $d.Out
     Set-Core '0.5.0' '0.1.0'
     $d = Deploy @()
     Ok ($d.Code -eq 0) 'deploy: core 0.5.0, floor 0.1.0 -> installed' $d.Out
-    Set-Core '0.5.0' '0.3.0'
+    Set-Core '0.7.0' '0.6.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 1 -and $d.Out -match '^Waypoints not deployed: Waypoints was made for Nucleus >=0\.2\.0, which this Nucleus 0\.5\.0 no longer supports \(oldest: 0\.3\.0\); update Waypoints\.') 'deploy: floor 0.3.0 above the need -> refused, naming the mod' $d.Out
+    Ok ($d.Code -eq 1 -and $d.Out -match '^Waypoints not deployed: Waypoints was made for Nucleus >=0\.5\.0, which this Nucleus 0\.7\.0 no longer supports \(oldest: 0\.6\.0\); update Waypoints\.') 'deploy: floor 0.6.0 above the need -> refused, naming the mod' $d.Out
     Ok (($d.Out.Trim() -split "`r?`n").Count -eq 1) 'deploy: the floor refusal is one line' $d.Out
     Set-Core '0.5.0' 'soon'
     $d = Deploy @()
@@ -191,19 +194,19 @@ try {
     Ok ($d.Code -eq 1 -and $d.Out -match "is not Nucleus's manifest") 'deploy: unreadable core mod.json -> refused' $d.Out
 
     # Core disabled.
-    Set-Core '0.2.0'
+    Set-Core '0.5.0'
     [IO.File]::WriteAllText($modsTxt, "Nucleus : 0`r`n" + $stockTxt)
     $d = Deploy @()
     Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus is installed but disabled in mods\.txt') 'deploy: core disabled -> refused' $d.Out
 
     # Good core: installed below Nucleus, above Keybinds; settings.lua generated; no core files bundled.
     [IO.File]::WriteAllText($modsTxt, "Waypoints : 1`r`n" + $coreTxt) # a Waypoints line above Nucleus must move below it
-    Set-Core '0.2.1'
+    Set-Core '0.5.1'
     $d = Deploy @()
-    Ok ($d.Code -eq 0) 'deploy: core 0.2.1 -> installed' $d.Out
+    Ok ($d.Code -eq 0) 'deploy: core 0.5.1 -> installed' $d.Out
     Eq (Txt) ("Nucleus : 1`r`nWaypoints : 1`r`n" + $stockTxt) 'deploy: Waypoints below Nucleus, above Keybinds'
     $files = @(Get-ChildItem (Join-Path $mods 'Waypoints') -Recurse -File | ForEach-Object { $_.FullName.Substring((Join-Path $mods 'Waypoints').Length + 1) } | Sort-Object)
-    Eq ($files -join ',') 'mod.json,Scripts\game.lua,Scripts\main.lua,Scripts\revive.lua,Scripts\settings.lua,Scripts\waypoints.lua' 'deploy: exactly the Waypoints files'
+    Eq ($files -join ',') 'mod.json,Scripts\game.lua,Scripts\main.lua,Scripts\mapbuttons.lua,Scripts\revive.lua,Scripts\settings.lua,Scripts\waypoints.lua' 'deploy: exactly the Waypoints files'
     Ok ((Get-Content (Join-Path $mods 'Waypoints\Scripts\settings.lua') -Raw) -match 'return \{ onRevive = "restore" \}') 'deploy: settings.lua from mod.json defaults'
     Ok (-not (Test-Path (Join-Path $mods 'WaypointsDriver'))) 'deploy: no driver without -Test'
 
@@ -221,6 +224,8 @@ try {
     Eq ([IO.File]::ReadAllText((Join-Path $mods 'WaypointsDriver\Scripts\scenario.txt'))) 'probe' 'deploy -Test: scenario.txt'
     Ok ((Get-Content (Join-Path $mods 'Waypoints\Scripts\settings.lua') -Raw) -match 'return \{ onRevive = "restore", debug = true \}') 'deploy -Test: debug on'
     Ok (Test-Path (Join-Path $mods 'WaypointsDriver\Scripts\main.lua')) 'deploy -Test: the driver installed'
+    $d = Deploy @('-Test', '-Scenario', 'buttons')
+    Ok ($d.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $mods 'WaypointsDriver\Scripts\scenario.txt')) -eq 'buttons') 'deploy -Test: buttons' $d.Out
     $d = Deploy @('-Test', '-Scenario', 'pair-victim', '-Staged')
     Ok ($d.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $mods 'WaypointsDriver\Scripts\scenario.txt')) -eq 'pair-victim') 'deploy -Test -Staged: pair-victim' $d.Out
     $d = Deploy @()
@@ -241,7 +246,7 @@ try {
     Ok ($d.Code -eq 0 -and -not (Test-Path (Join-Path $mods 'Waypoints'))) 'deploy -Remove: no Waypoints files' $d.Out
     Eq (Txt) $stockTxt 'deploy -Remove: mods.txt byte-identical to stock'
     New-Item -ItemType Directory -Force (Join-Path $mods 'Nucleus') | Out-Null
-    Set-Core '0.2.0'
+    Set-Core '0.5.0'
     [IO.File]::WriteAllText($modsTxt, $coreTxt)
     Deploy @('-Test') | Out-Null
     Deploy @('-Remove') | Out-Null

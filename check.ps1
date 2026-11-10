@@ -6,9 +6,11 @@
   A pattern must match somewhere; "!pattern" must match nowhere; "#N|pattern" must match exactly N lines;
   "?pattern" is a soft check (reported as "warn:", never failing); "?!pattern" is a soft check that it matches nowhere.
   Then the scenario's computed checks: READY after CONNECT ok; LOST before the first REVIVE; every REVIVE, REBOUND and
-  AGAIN followed by its RESTORED or CLEARED line before the next one; and for probe, the story 2 answers.
+  AGAIN followed by its RESTORED or CLEARED line before the next one; for buttons, MARKALL's marked and flags equal the
+  driver's EXPECT line (the map's distinct flag names minus the 2 marked by hand, plus 1 for a satellite flag) and a
+  MAPSYNC after CLEARALL (the reopen); and for probe, the story 2 answers.
   Exit code 1 when any check fails; otherwise prints "All checks passed."
-  Scenarios (run.ps1 drives them): probe, revive, death, no-core, old-core. Pair scenarios (tools/vm/pair.ps1 with
+  Scenarios (run.ps1 drives them): probe, revive, death, buttons, no-core, old-core. Pair scenarios (tools/vm/pair.ps1 with
   test/pair/waypoints-scenarios.ps1): pair-victim and pair-hostvictim judge the modded player's log, pair-host the host's
   driver. hand: a log from the README's hand check (Waypoints connected, no error, and every revive acted on).
   unit needs no log: it runs test.ps1.
@@ -22,7 +24,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('probe', 'revive', 'death', 'no-core', 'old-core', 'pair-victim', 'pair-host', 'pair-hostvictim', 'hand', 'unit')]
+    [ValidateSet('probe', 'revive', 'death', 'buttons', 'no-core', 'old-core', 'pair-victim', 'pair-host', 'pair-hostvictim', 'hand', 'unit')]
     [string] $Scenario = 'revive',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
@@ -61,7 +63,8 @@ $always = @(
 $warnRule = "!\[$C\] WARN (?!hud slow tick )"
 $running = @(
     "\[$C\] CONNECT ok $K \d+\.\d+\.\d+ "
-    "#1|\[$C\] READY onRevive=(restore|clear)\s*$"
+    # 0.2.0: Mark all / Clear all set up on core's panels and buttons (buttons=no means core lacked them: an ERROR too).
+    "#1|\[$C\] READY onRevive=(restore|clear) buttons=yes\s*$"
     "!\[$C\] ERROR"
     $warnRule
     "?!\[$C\] WARN hud slow tick "
@@ -106,6 +109,23 @@ $expect = @{
         "\[$D\] ANSWER journal-same-after-revive=(yes|no)"
         "\[$D\] SOLO revive1 EOGLock=true ok=true", "\[$D\] SOLO revive2 EOGLock=false ok=true"
     ) + (Get-RestoredChecks 'revive1') + (Get-DeathChecks 'revive1') + (Get-DeathChecks 'revive2')
+    'buttons' = $driven + @(
+        "\[$C\] PAWN first "
+        $noAction
+        "\[$D\] OK MARKED mark 2 waypoints", "\[$D\] OK MAPKEY ", "\[$D\] EXPECT buttons marked=\d+ flags=\d+ satellite=(yes|no) "
+        # Mark all: one press, the 2 flags marked by hand already up, nothing failed; the world agrees (driver).
+        "#1|\[$C\] MARKALL "
+        "\[$C\] MARKALL marked=\d+ already=2 failed=0 waypoints=\d+ flags=\d+ satellite=(yes|none)\s*$"
+        "\[$C\] MARK location '"
+        "\[$D\] OK BPOINT markall ", "\[$D\] OK ALLMARKED markall ", "\[$D\] OK ALLSELECTED markall ", "\[$D\] OK LOCAL markall "
+        # Clear all: one press, nothing failed, no waypoint left.
+        "#1|\[$C\] CLEARALL "
+        "\[$C\] CLEARALL cleared=\d+ direct=\d+ failed=0 waypoints=0 flags=\d+\s*$"
+        "\[$D\] OK BPOINT clearall ", "\[$D\] OK ALLCLEARED clearall ", "\[$D\] OK NONESELECTED clearall "
+        # Every map open synced (the Lua open while marking, the key opens), and the flags match the actors on the reopen.
+        "\[$C\] MAPSYNC flags=\d+ selected=\d+ satellite=(yes|no|none)\s*$"
+        "\[$D\] OK FLAGSMATCH reopen "
+    )
     'death' = $driven + @(
         "\[$C\] PAWN first "
         # Soft since V8.1.3: the game's managed death no longer calls RemoveAllWidgets, so the HUD (and core's `lost`)
@@ -207,6 +227,22 @@ if ($Target -eq 'host' -and $Scenario -notin 'no-core', 'old-core') {
     $rule = 'no steady-state hud slow tick outside a map arrival'
     if ($slowHard) { Fail "$rule (not: $($slowHard -join '; '))" }
     else { Pass ("$rule" + $(if ($slowSoft) { " ($slowSoft during one: soft)" } else { '' })) }
+}
+if ($Scenario -eq 'buttons') {
+    # The AC: MARKALL marked = the map's distinct flag names - 2 + 1 with a satellite flag; flags = the distinct names.
+    $exp = $lines | Where-Object { $_ -match "\[$D\] EXPECT buttons marked=(\d+) flags=(\d+) satellite=(yes|no) " } | Select-Object -First 1
+    $mk = $lines | Where-Object { $_ -match "\[$C\] MARKALL marked=(\d+) already=\d+ failed=\d+ waypoints=(\d+) flags=(\d+) satellite=(\w+)" } | Select-Object -First 1
+    if ($exp -and $mk) {
+        $null = $exp -match "EXPECT buttons marked=(\d+) flags=(\d+) satellite=(yes|no) "; $em, $ef, $es = [int]$Matches[1], [int]$Matches[2], $Matches[3]
+        $null = $mk -match "MARKALL marked=(\d+) already=\d+ failed=\d+ waypoints=(\d+) flags=(\d+) satellite=(\w+)"; $gm, $gw, $gf, $gs = [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], $Matches[4]
+        $wantSat = if ($es -eq 'yes') { 'yes' } else { 'none' }
+        $rule = "MARKALL matches the map (marked $gm of $em expected, flags $gf of $ef, waypoints $gw of $($ef + $(if ($es -eq 'yes') { 1 } else { 0 })), satellite $gs of $wantSat)"
+        if ($gm -eq $em -and $gf -eq $ef -and $gs -eq $wantSat -and $gw -eq ($ef + $(if ($es -eq 'yes') { 1 } else { 0 }))) { Pass $rule } else { Fail $rule }
+    } else { Fail 'MARKALL matches the map (no EXPECT or MARKALL line)' }
+    $im, $ic = (IndexOf "\[$C\] MARKALL "), (IndexOf "\[$C\] CLEARALL ")
+    $is = -1; for ($i = [Math]::Max($ic, 0); $i -lt $lines.Count; $i++) { if ($ic -ge 0 -and $lines[$i] -match "\[$C\] MAPSYNC ") { $is = $i; break } }
+    if ($im -ge 0 -and $ic -gt $im -and $is -gt $ic) { Pass 'MARKALL, then CLEARALL, then a MAPSYNC (the reopen)' }
+    else { Fail "MARKALL, then CLEARALL, then a MAPSYNC (MARKALL at line $im, CLEARALL at $ic, MAPSYNC after it at $is)" }
 }
 if ($Scenario -in 'probe', 'revive', 'pair-victim', 'pair-hostvictim') {
     Write-Host '--- answers ---'

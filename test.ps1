@@ -18,7 +18,7 @@ try {
     if ($Only -in 'all', 'lua') {
         if (-not $Lua) { Write-Host 'FAIL: no Lua 5.3/5.4 interpreter on PATH (lua, texlua, ...); pass -Lua'; $failed += 'lua' }
         else {
-            foreach ($t in 'revive_test', 'waypoints_test', 'main_test', 'driver_test') {
+            foreach ($t in 'revive_test', 'waypoints_test', 'mapbuttons_test', 'main_test', 'driver_test') {
                 # texlua prints a MiKTeX update reminder on stderr; only the test's own output matters.
                 $out = & $Lua "test/unit/$t.lua" 2>$null
                 $code = $LASTEXITCODE

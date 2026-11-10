@@ -27,7 +27,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('probe', 'revive', 'death', 'no-core', 'old-core', 'pair-victim', 'pair-host', 'pair-hostvictim')]
+    [ValidateSet('probe', 'revive', 'death', 'buttons', 'no-core', 'old-core', 'pair-victim', 'pair-host', 'pair-hostvictim')]
     [string] $Scenario = 'revive',
     [ValidateSet('', 'restore', 'clear')] [string] $OnRevive = '',  # '': mod.json's default
     [switch] $Force,

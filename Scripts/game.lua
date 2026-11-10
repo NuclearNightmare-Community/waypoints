@@ -192,4 +192,57 @@ function M.syncFlags(pawn, present, newByKey)
     return nl, ns
 end
 
+-- ---------------------------------------------------------------- the open Journal's flags (Mark all / Clear all)
+-- Everything below is read from the Journal the caller holds in this callback (a fresh deref of core's weak handle);
+-- nothing is kept. Evidence: the V8.2 decompile, Graphics/Journal/LevelLocationUI_C (its click destroys only the first
+-- LevelWaypointActor_C with its Name, else spawns one bound to its own Character) and SateliteUI_C (GetActorOfClass
+-- toggle, spawn at the Lever_Actor_C; no Character).
+M.LOC_CLICK = "BndEvt__LevelLocationUI_Button_28_K2Node_ComponentBoundEvent_0_OnButtonClickedEvent__DelegateSignature"
+M.SAT_CLICK = "BndEvt__SateliteUI_Button_28_K2Node_ComponentBoundEvent_0_OnButtonClickedEvent__DelegateSignature"
+
+-- The Journal's flags: { locations = { { widget, name }, ... } in MapUI_C.Levels order (live widgets with a readable
+-- Name only), satellite = widget | nil (MapUI_C.Satelite is unset on a map without a Lever_Actor_C) }. Raises when the
+-- Journal's MapWidget or MapUI can't be read.
+function M.journalFlags(journal)
+    if not valid(journal) then error("no live Journal") end
+    local mw = journal.MapWidget
+    if not valid(mw) then error("the Journal has no MapWidget") end
+    local mui = mw.MapUI
+    if not valid(mui) then error("the Journal's MapWidget has no MapUI") end
+    local out = { locations = {} }
+    local okL, levels = pcall(function() return mui.Levels end)
+    if okL and levels ~= nil then
+        pcall(function()
+            levels:ForEach(function(_, e)
+                pcall(function()
+                    local w = e:get()
+                    if valid(w) then
+                        local name = text(w.Name)
+                        if name and name ~= "" then out.locations[#out.locations + 1] = { widget = w, name = name } end
+                    end
+                end)
+            end)
+        end)
+    end
+    local okS, sat = pcall(function() return mui.Satelite end)
+    if okS and valid(sat) then out.satellite = sat end
+    return out
+end
+
+-- The Journal's Character (the game sets it on every map open) and its class name; pawn is nil unless it is alive.
+function M.journalPawn(journal)
+    local okC, p = pcall(function() return journal.Character end)
+    if not (okC and valid(p)) then return nil, "none" end
+    local okK, cls = pcall(M.classOf, p)
+    cls = okK and cls or "?"
+    if not M.alive(p) then return nil, cls .. " (destroyed)" end
+    return p, cls
+end
+
+function M.setCharacter(w, pawn) w.Character = pawn end
+function M.clickFlag(w) w[M.LOC_CLICK](w) end
+function M.clickSat(w) w[M.SAT_CLICK](w) end
+function M.selected(w) return w.Selected == true end
+function M.setSelected(w, on) w.Selected = on == true end
+
 return M
