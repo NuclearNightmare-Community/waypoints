@@ -56,8 +56,9 @@ $always = @(
     "!\[$D\] FAIL "
     "!\[$D\] .*STEP '.*' threw"
 )
-# Core's UI helpers log with Waypoints' tag; a slow tick is core's to judge (soft). In the VM every slow tick is soft.
-$warnRule = if ($Target -eq 'vm') { "!\[$C\] WARN (?!hud slow tick )" } else { "!\[$C\] WARN (?!hud slow tick .*(HUD event|steady state, a Lua GC step ran inside it))" }
+# Core's UI helpers log with Waypoints' tag; a slow tick is core's to judge (soft). On the host a steady-state one is
+# judged after the patterns (a computed check: soft during a map arrival); in the VM every slow tick is soft.
+$warnRule = "!\[$C\] WARN (?!hud slow tick )"
 $running = @(
     "\[$C\] CONNECT ok $K \d+\.\d+\.\d+ "
     "#1|\[$C\] READY onRevive=(restore|clear)\s*$"
@@ -72,7 +73,11 @@ $running = @(
 $driven = $running + @(
     "\[$D\] SCENARIO $([regex]::Escape($Scenario))\s*$"
     "\[$D\] END result=PASS"
+    # The driver's kill is one CallDamageEvent(1000) and the game's own death; its re-kill after 30 s is allowed but said.
+    "?!\[$D\] KILL .*FALLBACK "
 )
+# A death the driver caused (V8.1.5+): the game's own signals, Health <= 0 with the death gate open, then a spectator.
+function Get-DeathChecks([string] $p) { @("\[$D\] OK DIED $p ", "\[$D\] OK SPECTATOR $p ") }
 $noAction = "!\[$C\] (REVIVE|REBOUND|AGAIN|RESTORED|CLEARED) "
 function Get-RestoredChecks([string] $p) {
     @("\[$D\] OK ONE $p ", "\[$D\] OK BOUND $p ", "\[$D\] OK LOCAL $p ", "\[$D\] OK DRAWN $p ", "\[$D\] OK FLAGSMATCH $p ")
@@ -99,13 +104,16 @@ $expect = @{
         "\[$D\] OK MARKED mark 3 waypoints", "\[$D\] OK DRAWN before "
         "\[$D\] OK NONE revive2 ", "\[$D\] OK NOPAINT revive2 ", "\[$D\] OK FLAGSNONE revive2 "
         "\[$D\] ANSWER journal-same-after-revive=(yes|no)"
-    ) + (Get-RestoredChecks 'revive1')
+        "\[$D\] SOLO revive1 EOGLock=true ok=true", "\[$D\] SOLO revive2 EOGLock=false ok=true"
+    ) + (Get-RestoredChecks 'revive1') + (Get-DeathChecks 'revive1') + (Get-DeathChecks 'revive2')
     'death' = $driven + @(
         "\[$C\] PAWN first "
-        "\[$C\] LOST pawn=.* snapshot n=3 \(locations 2, satellite 1\)"
+        # Soft since V8.1.3: the game's managed death no longer calls RemoveAllWidgets, so the HUD (and core's `lost`)
+        # may stay through the death (V8.1.5: no LOST). Nothing is lost without it: the snapshot is only used by a revive.
+        "?\[$C\] LOST pawn=.* snapshot n=3 \(locations 2, satellite 1\)"
         $noAction
         "\[$D\] OK MARKED mark 3 waypoints", "\[$D\] OK DEAD ", "\[$D\] OK KEPT ", "\[$D\] OK UNTOUCHED "
-    )
+    ) + (Get-DeathChecks 'death')
     'no-core' = @(
         "#1|\[$C\] "
         "\[$C\] $K is not installed\. $C will not run\.\s*$"
@@ -124,18 +132,21 @@ $expect = @{
         "\[$C\] REVIVE pawn=.* snapshot=3 onRevive=restore\s*$"
         "\[$C\] RESTORED n=3 .*failed 0"
         "\[$D\] VICTIM ready marked="
-    ) + (Get-RestoredChecks 'revive')
+    ) + (Get-RestoredChecks 'revive') + (Get-DeathChecks 'victim')
     'pair-hostvictim' = $driven + @(
         "\[$C\] LOST pawn=.* snapshot n=3 "
         "\[$C\] REVIVE pawn=.* snapshot=3 onRevive=restore\s*$"
         "\[$C\] RESTORED n=3 .*failed 0"
-    ) + (Get-RestoredChecks 'revive')
+    ) + (Get-RestoredChecks 'revive') + (Get-DeathChecks 'death')
     'pair-host' = @(
         "\[$D\] SCENARIO pair-host\s*$"
         "\[$D\] REINFORCE radio:Reinformant\(\) ok=true"
+        "\[$D\] OK SPECTATOR victim "
         "\[$D\] OK REVIVED "
         "\[$D\] END result=PASS"
         "!\[$D\] VICTIM after death pawn class=BP_ThirdPersonCharacter_C"
+        # The victim kills itself (its own CallDamageEvent RPC); the host's kill 30 s later is the fallback, said.
+        "?!\[$D\] KILL victim FALLBACK "
     )
     'hand' = $running
 }
@@ -179,6 +190,23 @@ if ($Scenario -notin 'no-core', 'old-core', 'pair-host') {
         $il, $iv = (IndexOf "\[$C\] LOST pawn="), (IndexOf "\[$C\] REVIVE pawn=")
         if ($il -ge 0 -and $iv -gt $il) { Pass 'the snapshot (LOST) comes before the first REVIVE' } else { Fail "LOST before REVIVE (LOST at line $il, REVIVE at line $iv)" }
     }
+}
+# Core's HUD poll (it logs with Waypoints' tag; Waypoints itself has no per-tick work). On the host a steady-state slow
+# tick fails, unless a Lua GC step ran inside it or it came during a map arrival: from the driver's WORLD or TOUCHDOWN
+# line to its HUD line, while the game loads the map and plays the landing showcase. V8.2.1 revive (2026-11-09): one
+# 2208 us poll there, between VIEW and HUD; the minute's average 91 us, the next minute's max 202 us.
+if ($Target -eq 'host' -and $Scenario -notin 'no-core', 'old-core') {
+    $arriving = $false; $slowHard = @(); $slowSoft = 0
+    foreach ($l in $lines) {
+        if ($l -match "\[$D\] (WORLD|TOUCHDOWN) ") { $arriving = $true }
+        elseif ($l -match "\[$D\] HUD \S+ pawn=") { $arriving = $false }
+        elseif ($l -match "\[$C\] WARN hud slow tick " -and $l -notmatch 'HUD event|a Lua GC step ran inside it') {
+            if ($arriving) { $slowSoft++ } else { $slowHard += ($l -replace '^.*\] WARN ', '') }
+        }
+    }
+    $rule = 'no steady-state hud slow tick outside a map arrival'
+    if ($slowHard) { Fail "$rule (not: $($slowHard -join '; '))" }
+    else { Pass ("$rule" + $(if ($slowSoft) { " ($slowSoft during one: soft)" } else { '' })) }
 }
 if ($Scenario -in 'probe', 'revive', 'pair-victim', 'pair-hostvictim') {
     Write-Host '--- answers ---'
