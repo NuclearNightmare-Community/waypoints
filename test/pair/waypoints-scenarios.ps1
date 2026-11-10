@@ -13,7 +13,8 @@
   Prereq also refuses a host copy with Waypoints or core of its own (the host must stay unmodded but for the driver).
   Roles (test/WaypointsDriver scenario.txt):
     mk-client  B (VM, client) = Nucleus + Waypoints + WaypointsDriver "pair-victim": marks two flags and the satellite,
-               dies on the host's signal (kill.txt; DeathEvent on its own pawn), revived through the host's radio; then the revive checks on B.
+               dies on the host's signal (kill.txt; CallDamageEvent(1000) on its own pawn, the host's own CallDamageEvent(1000)
+               on B if B is still alive 30 s later), revived through the host's radio; then the revive checks on B.
                A (host) = WaypointsDriver "pair-host" only (no Waypoints): a modded client of an unmodded host (CAP-3),
                and the kill signal and the reinforcement: BP_Radio_C:Reinformant(), the computer's
                "call reinforcement" (it picks SpawnReinforcementMethod2 when the dead player is queued, else the
@@ -63,7 +64,7 @@ function Get-WaypointsCheck([string] $Log, [string] $Scenario, [ValidateSet('hos
 
 $script:WaypointsPairScenarios = @{
     'mk-client' = @{
-        Summary = 'Waypoints: B (client, modded) marks 2 flags + satellite, A (host, WaypointsDriver only) signals B''s kill (B calls DeathEvent on its own pawn) and reinforces it via the radio; B''s waypoints must come back'
+        Summary = 'Waypoints: B (client, modded) marks 2 flags + satellite, A (host, WaypointsDriver only) signals B''s kill (B calls CallDamageEvent(1000) on its own pawn; A does it 30 s later if B still lives) and reinforces it via the radio; B''s waypoints must come back'
         Prereq = {
             # The host stays unmodded but for the driver (CAP-3): no Waypoints or core of its own in the host copy.
             $own = @('Waypoints', 'Nucleus' | Where-Object { Test-Path (Join-Path $modsDir $_) }) + @('Nucleus.pak' | Where-Object { Test-Path (Join-Path $inst "NuclearNightmare\Content\Paks\LogicMods\$_") })
@@ -86,13 +87,15 @@ $script:WaypointsPairScenarios = @{
         AfterJoin = {
             Save-ShotAt -Seconds 120 -Name 'marked' -Expect 'B in the match with 2 location waypoints and the satellite waypoint on screen'
             Wait-HostLine '\[WaypointsDriver\] KILL victim ' 600 | Out-Null
-            # The host's DeathEvent() on B's remote character did nothing (2026-10-27), so B kills itself: the
-            # driver in the VM polls for Scripts\kill.txt (a fixed name, fixed content; nothing from the game).
+            # B kills itself (CallDamageEvent(1000) on its own pawn, a server RPC); the host kills B itself if B is
+            # still alive 30 s after its signal. The driver in the VM polls for Scripts\kill.txt (a fixed name, fixed
+            # content; nothing from the game).
             $sig = Join-Path (Get-NNBCopyPaths).ModsDir 'WaypointsDriver\Scripts\kill.txt'
             Invoke-NNB -ArgumentList $sig -ScriptBlock { param($f) Set-Content -LiteralPath $f 'kill' }
             Write-Host "Kill signal written to the VM: $sig"
             $script:LastAction = @{ Name = 'kill signal'; Time = Get-Date }
-            Save-ShotAt -Seconds 15 -Name 'dead' -Expect 'B dead (spectator view or death screen); no waypoints'
+            # The game's death takes about 12 s (the fade) before B is a spectator.
+            Save-ShotAt -Seconds 20 -Name 'dead' -Expect 'B dead (spectator view or death screen)'
             Wait-HostLine '\[WaypointsDriver\] OK REVIVED ' 300 | Out-Null; $script:LastAction = @{ Name = 'host OK REVIVED'; Time = Get-Date }   # shots count from the last action
             Save-ShotAt -Seconds 10 -Name 'revived' -Expect 'B revived: the same 3 waypoints on screen with distances, white (bound to the live pawn)'
         }

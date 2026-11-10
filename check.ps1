@@ -72,7 +72,11 @@ $running = @(
 $driven = $running + @(
     "\[$D\] SCENARIO $([regex]::Escape($Scenario))\s*$"
     "\[$D\] END result=PASS"
+    # The driver's kill is one CallDamageEvent(1000) and the game's own death; its re-kill after 30 s is allowed but said.
+    "?!\[$D\] KILL .*FALLBACK "
 )
+# A death the driver caused (V8.1.5+): the game's own signals, Health <= 0 with the death gate open, then a spectator.
+function Get-DeathChecks([string] $p) { @("\[$D\] OK DIED $p ", "\[$D\] OK SPECTATOR $p ") }
 $noAction = "!\[$C\] (REVIVE|REBOUND|AGAIN|RESTORED|CLEARED) "
 function Get-RestoredChecks([string] $p) {
     @("\[$D\] OK ONE $p ", "\[$D\] OK BOUND $p ", "\[$D\] OK LOCAL $p ", "\[$D\] OK DRAWN $p ", "\[$D\] OK FLAGSMATCH $p ")
@@ -99,13 +103,16 @@ $expect = @{
         "\[$D\] OK MARKED mark 3 waypoints", "\[$D\] OK DRAWN before "
         "\[$D\] OK NONE revive2 ", "\[$D\] OK NOPAINT revive2 ", "\[$D\] OK FLAGSNONE revive2 "
         "\[$D\] ANSWER journal-same-after-revive=(yes|no)"
-    ) + (Get-RestoredChecks 'revive1')
+        "\[$D\] SOLO revive1 EOGLock=true ok=true", "\[$D\] SOLO revive2 EOGLock=false ok=true"
+    ) + (Get-RestoredChecks 'revive1') + (Get-DeathChecks 'revive1') + (Get-DeathChecks 'revive2')
     'death' = $driven + @(
         "\[$C\] PAWN first "
-        "\[$C\] LOST pawn=.* snapshot n=3 \(locations 2, satellite 1\)"
+        # Soft since V8.1.3: the game's managed death no longer calls RemoveAllWidgets, so the HUD (and core's `lost`)
+        # may stay through the death (V8.1.5: no LOST). Nothing is lost without it: the snapshot is only used by a revive.
+        "?\[$C\] LOST pawn=.* snapshot n=3 \(locations 2, satellite 1\)"
         $noAction
         "\[$D\] OK MARKED mark 3 waypoints", "\[$D\] OK DEAD ", "\[$D\] OK KEPT ", "\[$D\] OK UNTOUCHED "
-    )
+    ) + (Get-DeathChecks 'death')
     'no-core' = @(
         "#1|\[$C\] "
         "\[$C\] $K is not installed\. $C will not run\.\s*$"
@@ -124,18 +131,21 @@ $expect = @{
         "\[$C\] REVIVE pawn=.* snapshot=3 onRevive=restore\s*$"
         "\[$C\] RESTORED n=3 .*failed 0"
         "\[$D\] VICTIM ready marked="
-    ) + (Get-RestoredChecks 'revive')
+    ) + (Get-RestoredChecks 'revive') + (Get-DeathChecks 'victim')
     'pair-hostvictim' = $driven + @(
         "\[$C\] LOST pawn=.* snapshot n=3 "
         "\[$C\] REVIVE pawn=.* snapshot=3 onRevive=restore\s*$"
         "\[$C\] RESTORED n=3 .*failed 0"
-    ) + (Get-RestoredChecks 'revive')
+    ) + (Get-RestoredChecks 'revive') + (Get-DeathChecks 'death')
     'pair-host' = @(
         "\[$D\] SCENARIO pair-host\s*$"
         "\[$D\] REINFORCE radio:Reinformant\(\) ok=true"
+        "\[$D\] OK SPECTATOR victim "
         "\[$D\] OK REVIVED "
         "\[$D\] END result=PASS"
         "!\[$D\] VICTIM after death pawn class=BP_ThirdPersonCharacter_C"
+        # The victim kills itself (its own CallDamageEvent RPC); the host's kill 30 s later is the fallback, said.
+        "?!\[$D\] KILL victim FALLBACK "
     )
     'hand' = $running
 }

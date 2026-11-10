@@ -14,20 +14,24 @@
 --            toggling the WidgetComponent's space, re-running the actor's BeginPlay (a new widget), or respawning the
 --            actor (Waypoints' way). (4) Liveness: a waypoint the flag destroyed is still returned by FindAllOf until GC,
 --            and game.alive() tells it apart.
---   revive:  a revive through the game's own code, solo host: the local character is queued (game state
---            UpdateRespawnQue) and the radio's ReinforceSpecficPlayer spawns and possesses a new character exactly as a
---            reinforcement does (RPCReinforcementMethod2 on this machine: RemoveAllWidgets, Possess, new HUD).
+--   revive:  a revive through the game's own code, solo host (V8.1.5+): the game state's EOGLock holds the match
+--            (stands in for a living teammate), the player really dies (kill: one CallDamageEvent(1000), the game's
+--            whole death), then the radio's ReinforceSpecficPlayer(dead body) spawns and possesses a new character as
+--            the computer's reinforcement button does; EOGLock is released after it.
 --            Revive 1 with onRevive=restore: one actor per waypoint, bound to the new pawn, painted, bReplicates false,
 --            the flags match; same Journal instance? Then the driver rewrites Waypoints' settings.lua to onRevive=clear
 --            (read at every revive) and revive 2: no waypoint, no flag selected.
---   death:   solo host: waypoints up, then the player dies (DeathEvent() on itself): spectator,
---            the waypoints keep existing, Waypoints takes its snapshot and does nothing else.
+--   death:   solo host: waypoints up, then the player dies (one CallDamageEvent(1000), then the game's own death):
+--            spectator, the waypoint actors keep existing, Waypoints does nothing else. Also answers (not a check)
+--            whether the waypoints still paint while spectating.
+--   Kills are judged by the game's own signals (DIED: Health <= 0 and NNDeathFadeLibrary:CanBeginTerminalDeathEffects;
+--   SPECTATOR: the controller's pawn ~12 s later), never by the HUD. TRACE and HUDSTATE lines log the death path.
 --   no-core, old-core: in a match: nothing from Waypoints (check.ps1 judges its one line).
---   pair-victim:     (B, a client in the VM) marks, dies on the host's signal (kill.txt: DeathEvent() on its own
---                    pawn), is revived by the host's radio; then the revive 1 checks on the client.
---   pair-host:       (A, the host, Waypoints not needed) once B is in the match: waits, signals B's kill, waits for
---                    B's death, calls the radio's Reinformant (the computer's "call reinforcement"), waits for B's new
---                    character.
+--   pair-victim:     (B, a client in the VM) marks, dies on the host's signal (kill.txt: CallDamageEvent(1000) on its
+--                    own pawn), is revived by the host's radio; then the revive 1 checks on the client.
+--   pair-host:       (A, the host, Waypoints not needed) once B is in the match: waits, signals B's kill (and kills B
+--                    itself if B is still alive 30 s later), waits for B's death, calls the radio's Reinformant (the
+--                    computer's "call reinforcement"), waits for B's new character.
 --   pair-hostvictim: (A, the host, modded) marks, dies, calls the radio's Reinformant itself, then the revive checks.
 -- Keys it can't press itself (Enter for touchdown) go to run.ps1 through request.txt / done.txt next to this file.
 -- Never keeps a UObject across steps: only paths and names, re-found each step.
@@ -549,30 +553,6 @@ local function clearedChecks(phase)
     end)
 end
 
--- The radio's reinforcement of one character (BP_Radio_C:ReinforceSpecficPlayer, a server RPC run on the host) after
--- queueing it as a death would (game state UpdateRespawnQue).
-local function syntheticRevive(phase)
-    -- The death a real revive follows: death calls RemoveAllWidgets, and the player has no HUD for a while (core sees
-    -- `lost`). Without it, core could see the old HUD replaced by the new one in one poll (no `lost`), which Waypoints
-    -- rightly treats as a rebound (no proven death), not a revive.
-    step(phase .. ": death's RemoveAllWidgets", function()
-        local okR = pcall(function() WLL():RemoveAllWidgets(pc()) end)
-        say("DEATHSIM %s RemoveAllWidgets ok=%s", phase, tostring(okR))
-        return after(3), 8, "HUD lost"
-    end)
-    step(phase .. ": reinforce", function()
-        local c, p = pc(), myPawn()
-        S.journalBefore = S.journalPath
-        local gs = valid(c) and c:GetWorld() and GS():GetGameState(c) or nil
-        local radio = FindFirstOf("BP_Radio_C")
-        if not (valid(gs) and valid(radio) and p) then check(false, "REINFORCE %s game state, radio and pawn found", phase) return end
-        local okQ, eQ = pcall(function() gs:UpdateRespawnQue(c, p) end)
-        local okR, eR = pcall(function() radio:ReinforceSpecficPlayer(p) end)
-        say("REINFORCE %s UpdateRespawnQue ok=%s %s; ReinforceSpecficPlayer ok=%s %s", phase, tostring(okQ), okQ and "" or tostring(eQ), tostring(okR), okR and "" or tostring(eR))
-    end)
-    waitPawnChange(phase, 60)
-end
-
 local function setOnRevive(value)
     step("set onRevive=" .. value, function()
         local path = modsDir .. "\\" .. WAYPOINTS .. "\\Scripts\\settings.lua"
@@ -584,27 +564,225 @@ local function setOnRevive(value)
     end)
 end
 
--- Kills a character on the host (authority) through the character's own DeathEvent() (what its HealthDeath delegate
--- calls). ExplosionDamage from Lua didn't kill in the VM; DeathEvent did. Still possessed 5 s later: DeathEvent once
--- more (the event keeps a HasCalledDeathEvent? flag and takes another branch on a second call).
+-- ---------------------------------------------------------------- the game's death path, traced
+-- V8.1.3+ (decompile of BP_FirstPersonCharacter_C, V8.1.5 and V8.2): damage (the native CallDamageEvent, what every
+-- enemy hit, frostbite and fall damage go through) -> HealthDeath -> DeathEvent (HideInventory, HideCrosshair) ->
+-- MoreDeathFX (NNDeathFadeLibrary:CanBeginTerminalDeathEffects, DeathHud) -> the FadeOut widget (RegisterDeathFade; slow
+-- on purpose) -> its FadeOut delegate -> Spectate -> NotifyDeathFadeBlack -> RemoveAllWidgets unless
+-- IsManagedDeathTransition -> SpawnSpecator (native HandleDeathSpawn) -> Spectator_C BeginPlay. The trace logs every
+-- one of those calls that UE4SS can hook ("TRACE" lines, never checks), so a run shows which way the game went.
+local CH = "/Game/FirstPerson/Blueprints/BP_FirstPersonCharacter.BP_FirstPersonCharacter_C:"
+local NN = "/Script/NuclearNightmare."
+local TRACE_FNS = {
+    CH .. "DeathEvent", CH .. "MoreDeathFX", CH .. "Spectate", CH .. "SpawnSpecator",
+    NN .. "NNDeathFadeLibrary:RegisterDeathFade", NN .. "NNDeathFadeLibrary:NotifyDeathFadeBlack",
+    NN .. "NNDeathFadeLibrary:IsManagedDeathTransition", "/Script/UMG.WidgetLayoutLibrary:RemoveAllWidgets",
+    NN .. "NNDeathFadeComponent:ClientBeginDeath", NN .. "NNDeathFadeComponent:ClientRequestBlack",
+    NN .. "NNDeathFadeComponent:ServerAcknowledgeBlack", NN .. "NNDeathFadeComponent:ClientHandoffCompleted",
+    NN .. "NNDeathFadeComponent:ClientCancelDeath",
+    NN .. "NNPlayableSpawnLibrary:HandleDeathSpawn", NN .. "NNPlayableSpawnLibrary:RegisterDeathReinforcement",
+    "/Game/FirstPerson/Blueprints/BP_FirstPersonGameState.BP_FirstPersonGameState_C:UpdateRespawnQue",
+    "/Game/FirstPerson/Blueprints/Spectator.Spectator_C:EndGame",
+    "/Game/Gameplay/ClassifiedMaterials/BP_Radio.BP_Radio_C:ReinforceSpecficPlayer",
+    "/Game/Gameplay/ClassifiedMaterials/BP_Radio.BP_Radio_C:RPCReinforcementMethod2",
+    NN .. "NNRadioReinforcementLibrary:AdmitRadioCandidate", NN .. "NNRadioReinforcementLibrary:TryPossessRadioCandidate",
+    NN .. "NNRadioReinforcementOwnerComponent:ClientCompleteOwner",
+}
+local TRACE = { hooked = {}, n = {}, t0 = os.clock(), lastTry = -10 }
+local function traceHooks()
+    if os.clock() - TRACE.lastTry < 2 then return end -- a miss is a full object scan: not every tick
+    TRACE.lastTry = os.clock()
+    for _, fn in ipairs(TRACE_FNS) do
+        if not TRACE.hooked[fn] and StaticFindObject(fn) then
+            local short = fn:match("[^.:]+:[^:]+$") or fn
+            local ok = pcall(RegisterHook, fn, function()
+                pcall(function()
+                    TRACE.n[fn] = (TRACE.n[fn] or 0) + 1
+                    if TRACE.n[fn] <= 4 then say("TRACE +%.1f s %s (#%d)", os.clock() - TRACE.t0, short, TRACE.n[fn]) end
+                end)
+            end)
+            TRACE.hooked[fn] = ok
+            if not ok then say("TRACE hook failed %s", short) end
+        end
+    end
+end
+-- A native library function called as a UFunction on its class default object (never UE4SS's own method of the same
+-- name): "true", "false", "?" (not found) or "error".
+local function libCall(cls, fn, ...)
+    local lib, f = StaticFindObject(NN .. "Default__" .. cls), StaticFindObject(NN .. cls .. ":" .. fn)
+    if not (valid(lib) and valid(f)) then return "?" end
+    local args = { ... }
+    local ok, r = pcall(function() return f(lib, table.unpack(args)) end)
+    return ok and tostring(r) or "error"
+end
+-- The local HUD as Nucleus sees it (InventoryUI_C in the viewport), its visibility, and the pawn. Logged only (HUDSTATE,
+-- PAINTLINE): since V8.1.3 the managed death keeps the HUD in the viewport, so it is no death signal.
+local function hudState()
+    local inVp, vis = false, "-"
+    for _, w in ipairs(FindAllOf("InventoryUI_C") or {}) do
+        if valid(w) and not pathOf(w):find("Default__", 1, true) then
+            local ok, v = pcall(function() return w:IsInViewport() end)
+            if ok and v then inVp = true; pcall(function() vis = tostring(w:GetVisibility()) end) end
+        end
+    end
+    local p = myPawn()
+    return string.format("hud=%s vis=%s pawn=%s", tostring(inVp), vis, p and classOf(p) or "none"), inVp
+end
+local function traceState(tag)
+    local s = hudState()
+    if s ~= TRACE.last then TRACE.last = s say("HUDSTATE %s +%.1f s %s", tag, os.clock() - TRACE.t0, s) end
+end
+
+-- ---------------------------------------------------------------- killing a character (V8.1.5+)
+-- Since V8.1.5 DeathEvent() does nothing on a pawn that took no real damage: MoreDeathFX starts with the native gate
+-- NNDeathFadeLibrary:CanBeginTerminalDeathEffects, false while Health > 0. So the kill is the game's own damage, one
+-- CallDamageEvent(1000) (any amount >= Health kills; 1000 survives damage scaling down to 10x), and then the game's whole
+-- death, slow on purpose (the FadeOut plays at 0.1x): the controller's pawn becomes Spectator_C about 12 s later (V8.1.5
+-- and V8.2 traces). A re-kill 5 s in cut into it on V8.1.5. The death signals, in order:
+--   DYING: right away, CanBeginTerminalDeathEffects(body) is true and Health <= 0 (a client sees the replicated Health);
+--   LEFT:  ~12 s later, the controller's pawn is no longer the body (Spectator_C; a playable monster if infected or with
+--          Playable Enemy on).
+-- Not death signals: the HUD (it stays in the viewport) and HasCalledDeathEvent? (nothing sets it).
+local KILL_FALLBACK, KILL_TIMEOUT, SPECTATOR = 30, 60, "Spectator_C"
+local function hpOf(p) local ok, h = pcall(function() return p.Health end) return ok and tonumber(h) or nil end
+local function guardOf(p) return libCall("NNDeathFadeLibrary", "CanBeginTerminalDeathEffects", p) end
+
+-- A poll for the death of the character S.killed under the local controller. Logs DYING once the immediate signal shows
+-- (needGuard: CanBeginTerminalDeathEffects must be true too; a client may only see the replicated Health), runs
+-- onStuck(t) once if the controller still has the character after KILL_FALLBACK s, and is done when the controller's
+-- pawn is something else (S.left = { t, class, path }).
+local function deathWatch(phase, needGuard, onStuck)
+    local stuck = false
+    S.dying, S.left = nil, nil
+    return function()
+        traceHooks()
+        traceState(phase)
+        local t = os.clock() - TRACE.t0
+        if not S.dying then
+            local body = found(S.killed)
+            local g, h = body and guardOf(body), body and hpOf(body)
+            if h and h <= 0 and (g == "true" or not needGuard) then
+                S.dying = t
+                say("DYING %s +%.1f s guard=%s hp=%s", phase, t, tostring(g), tostring(h))
+            end
+        end
+        local p = myPawn()
+        if p and pathOf(p) == S.killed then
+            if not stuck and t > KILL_FALLBACK then stuck = true; if onStuck then onStuck(t) end end
+            return false
+        end
+        if not p then return false end -- between pawns
+        S.left = { t = t, class = classOf(p), path = pathOf(p) }
+        say("LEFT %s +%.1f s the controller's pawn is %s (%s) managed=%s fallback=%s", phase, t, S.left.class, S.left.path,
+            libCall("NNDeathFadeLibrary", "IsManagedDeathTransition", p), tostring(stuck))
+        return true
+    end
+end
+-- The checks after a death: the immediate signal, then the spectator.
+local function deathChecks(phase)
+    step(phase .. ": died", function()
+        check(S.dying ~= nil, "DIED %s the character took the game's death: Health <= 0 and the terminal-death gate open%s", phase,
+            S.dying and string.format(" (+%.1f s)", S.dying) or "")
+        local l = S.left
+        check(l ~= nil and l.class == SPECTATOR, "SPECTATOR %s the controller's pawn became %s%s", phase, SPECTATOR,
+            l and string.format(" (%s at +%.1f s)", l.class, l.t) or " (it never left the character)")
+    end)
+end
+
+-- Kills the local player's own character on the host (authority) the way the game does: one CallDamageEvent(1000), then
+-- the game's whole death. Only if the character is still possessed after KILL_FALLBACK s does the driver set Health 0
+-- and call DeathEvent itself (a FALLBACK line). Step timeout KILL_TIMEOUT s.
 local function kill(phase, which)
     step(phase .. ": kill", function()
         local target = which()
         if not target then check(false, "KILL %s target found", phase) return end
         S.killed = pathOf(target)
-        local ok, err = pcall(function() target:DeathEvent() end)
-        say("KILL %s %s DeathEvent ok=%s %s", phase, S.killed, tostring(ok), ok and "" or tostring(err))
-        return after(5), 10, "death"
+        TRACE.t0, TRACE.last = os.clock(), nil
+        traceHooks()
+        say("KILL %s before guard=%s hp=%s", phase, guardOf(target), tostring(hpOf(target)))
+        local ok, err = pcall(function() target:CallDamageEvent(1000) end)
+        say("KILL %s %s CallDamageEvent(1000) ok=%s %s", phase, S.killed, tostring(ok), ok and "" or tostring(err))
+        local watch = deathWatch(phase, true, function(t)
+            local body = found(S.killed)
+            if not body then return end
+            local okH = pcall(function() body.Health = 0 end)
+            local okD, eD = pcall(function() body:DeathEvent() end)
+            say("KILL %s FALLBACK still possessed after %.0f s: Health 0 (ok=%s) + DeathEvent ok=%s %s", phase, t, tostring(okH), tostring(okD), okD and "" or tostring(eD))
+        end)
+        if watch() then return end
+        return watch, KILL_TIMEOUT, phase .. " death (the controller leaves the character)"
     end)
-    step(phase .. ": kill again", function()
-        local t = found(S.killed)
-        local stillPossessed = false
-        for _, c in ipairs(FindAllOf("PlayerController") or {}) do if valid(c) and pawnOf(c) and pathOf(pawnOf(c)) == S.killed then stillPossessed = true end end
-        if t and stillPossessed then
-            local ok, err = pcall(function() t:DeathEvent() end)
-            say("KILL %s still possessed after 5 s: DeathEvent again ok=%s %s", phase, tostring(ok), ok and "" or tostring(err))
-        end
+    deathChecks(phase)
+end
+
+-- While dead (spectating): are the waypoints still painted? Not a check (Waypoints doesn't depend on it): an ANSWER line.
+-- Each waypoint aimed at as before (the spectator's controller), then 4 s of any paint without aiming.
+local function paintWhileDead(phase)
+    step(phase .. ": paint aimed", paintEach(phase, "paintDead"))
+    step(phase .. ": paint any", paintWindow(phase .. "-any", 4, "paintDeadAny"))
+    step(phase .. ": paint answer", function()
+        local n, any = 0, 0
+        for _, c in pairs(S.paintDead or {}) do if c > 0 then n = n + 1 end end
+        for _, c in pairs(S.paintDeadAny or {}) do any = any + c end
+        say("ANSWER painted-while-dead=%s (%d of %d waypoints painted when aimed at; %d paints unaimed) %s", (n > 0 or any > 0) and "yes" or "no",
+            n, #S.marked, any, hudState())
     end)
+end
+
+-- The game state's EOGLock, the game's own end-of-game latch. Solo, the last death would end the match (Spectator_C:
+-- everyone dead -> EndGame -> EndGameCam) before anyone could call reinforcements; holding the latch stands in for a
+-- teammate still alive. Released after the revive, or the match could never end.
+local function holdMatch(phase, on)
+    step(phase .. (on and ": hold the match" or ": release the match"), function()
+        local okG, gs = pcall(function() return GS():GetGameState(pc()) end)
+        local ok = okG and valid(gs) and pcall(function() gs.EOGLock = on end)
+        say("SOLO %s EOGLock=%s ok=%s", phase, tostring(on), tostring(ok))
+    end)
+end
+
+-- A revive the way the game does it (V8.1.5+), solo host. The radio no longer revives a living character (V8.1.3's
+-- native NNRadioReinforcementLibrary:AdmitRadioCandidate checks the queued body), so the player really dies first (kill:
+-- the game's own death and respawn-queue entry), then the radio's ReinforceSpecficPlayer(dead body) runs: what the
+-- computer's per-player reinforcement button calls (a server RPC, run on the host).
+local function realRevive(phase)
+    holdMatch(phase, true)
+    kill(phase, myPawn)
+    paintWhileDead(phase .. "-dead")
+    step(phase .. ": reinforce", function()
+        S.journalBefore = S.journalPath
+        local body = found(S.killed)
+        local radio = FindFirstOf("BP_Radio_C")
+        if not (body and valid(radio)) then check(false, "REINFORCE %s dead body and radio found", phase) return end
+        TRACE.t0 = os.clock()
+        local okR, eR = pcall(function() radio:ReinforceSpecficPlayer(body) end)
+        say("REINFORCE %s ReinforceSpecficPlayer(dead body %s) ok=%s %s", phase, S.killed:match("[^.]+$"), tostring(okR), okR and "" or tostring(eR))
+        -- Does the reinforcement still stop the old waypoints painting (the bug Waypoints fixes)? Until Waypoints replaces
+        -- the first location's actor, aim at it every tick and log its paints per tick (PAINTLINE; not a check).
+        local name
+        for _, n in ipairs(S.marked) do if n ~= "Satellite" then name = n break end end
+        local e = name and (waypoints())[name]
+        if not (e and e.loc) then return end
+        local oldPath, t0, last = e.path, os.clock(), nil
+        S.paint, S.painting = {}, true
+        return function()
+            local now = (waypoints())[name]
+            local replaced = not now or now.path ~= oldPath
+            local n = S.paint[name] or 0
+            S.paint = {}
+            local okA = pcall(aimAt, e.loc)
+            local okO, off = pcall(offAim, e.loc)
+            local line = string.format("%s paints=%d off=%s %s", name, n, okO and string.format("%.0f", off) or "?", hudState())
+            if line ~= last or n > 0 then say("PAINTLINE %s +%.2f s %s%s", phase, os.clock() - t0, line, okA and "" or " (aim failed)") last = line end
+            if replaced or os.clock() - t0 > 8 then
+                S.painting = false
+                say("PAINTLINE %s end +%.2f s (%s)", phase, os.clock() - t0, replaced and "Waypoints replaced the old actor" or "8 s")
+                return true
+            end
+            return false
+        end, 15, phase .. " paint timeline"
+    end)
+    waitPawnChange(phase, 60)
+    holdMatch(phase, false)
 end
 
 -- ---------------------------------------------------------------- scenarios
@@ -761,18 +939,19 @@ local function buildRevive()
     drawnAll("before", "paintBefore")
     step("journal before", function() openMap("before") return after(1), 5, "open" end)
     step("journal before 2", function() flagState("before") closeMap() end)
-    syntheticRevive("revive1")
+    realRevive("revive1")
     restoredChecks("revive1")
     setOnRevive("clear")
-    syntheticRevive("revive2")
+    realRevive("revive2")
     clearedChecks("revive2")
 end
 
 local function buildDeath()
     enterMatch("match1")
     mark("mark", 2)
+    step("paint before", paintEach("before", "paintBefore"))
     kill("death", myPawn)
-    wait("after death", 15)
+    wait("after death", 3)
     step("dead", function()
         local p = myPawn()
         say("DEAD pawn=%s class=%s hud=%s", p and pathOf(p) or "none", p and classOf(p) or "none", tostring(liveHud() ~= nil))
@@ -784,6 +963,7 @@ local function buildDeath()
         for name, e in pairs(wp) do if name ~= "Satellite" and e.character ~= S.pawnPath then untouched = false end end
         check(untouched, "UNTOUCHED no waypoint was rebound after a death without a revive")
     end)
+    paintWhileDead("dead")
 end
 
 local function buildNoWaypoints()
@@ -809,31 +989,33 @@ local function buildPairVictim()
     step("paint before", paintEach("before", "paintBefore"))
     drawnAll("before", "paintBefore")
     step("victim ready", function() say("VICTIM ready marked=%s", table.concat(S.marked, ",")) end)
-    -- The kill: the host's DeathEvent() on this (remote) character does nothing (mk-client 2026-10-27: still
-    -- possessed after two calls; the event's first branch only acts on the locally controlled pawn). So the host
-    -- only signals: it logs "KILL victim", pair.ps1 writes kill.txt next to this file, and this machine calls
-    -- DeathEvent() on its own pawn (the solo-proven path); still alive 5 s later: CallDamageEvent(100) (the
-    -- character's server RPC, the client reporting damage).
-    step("death", function()
-        local was = S.pawnPath
+    -- The kill (V8.1.5+): the host logs "KILL victim", pair.ps1 writes kill.txt next to this file, and this machine
+    -- calls CallDamageEvent(1000) on its own pawn (the character's server RPC: the host runs the damage, then the game's
+    -- managed death). If this pawn is still alive 30 s after its signal, the host calls CallDamageEvent(1000) on it
+    -- itself (pair-host's FALLBACK). Here the DYING signal is the replicated Health alone (the death gate is the
+    -- host's); the death ends when this controller's pawn is a Spectator_C.
+    step("signal", function()
         return function()
-            local p = myPawn()
-            if not (p and classOf(p) == FP and pathOf(p) == was) then return true end
-            if not S.selfKill then
-                local f = io.open(KILL_SIGNAL, "r")
-                if not f then return false end
-                f:close()
-                S.selfKill = os.clock()
-                local ok, err = pcall(function() p:DeathEvent() end)
-                say("SELFKILL the host's signal: DeathEvent() on my pawn %s ok=%s %s", pathOf(p), tostring(ok), ok and "" or tostring(err))
-            elseif not S.selfKill2 and os.clock() - S.selfKill > 5 then
-                S.selfKill2 = true
-                local ok, err = pcall(function() p:CallDamageEvent(100) end)
-                say("SELFKILL still possessed after 5 s: CallDamageEvent(100) ok=%s %s", tostring(ok), ok and "" or tostring(err))
-            end
-            return false
-        end, 600, "killed (the host's signal, then this machine's own DeathEvent)"
+            local f = io.open(KILL_SIGNAL, "r")
+            if not f then return false end
+            f:close()
+            return true
+        end, 600, "the host's kill signal (kill.txt)"
     end)
+    step("victim: kill", function()
+        local p = myPawn()
+        if not (p and classOf(p) == FP) then check(false, "KILL victim my first-person pawn found") return end
+        S.killed = pathOf(p)
+        TRACE.t0, TRACE.last = os.clock(), nil
+        traceHooks()
+        say("SELFKILL before guard=%s hp=%s", guardOf(p), tostring(hpOf(p)))
+        local ok, err = pcall(function() p:CallDamageEvent(1000) end)
+        say("SELFKILL the host's signal: CallDamageEvent(1000) on my pawn %s ok=%s %s", S.killed, tostring(ok), ok and "" or tostring(err))
+        local watch = deathWatch("victim", false, nil)
+        -- The host's fallback comes KILL_FALLBACK s after its own signal line; its death then takes ~12 s more.
+        return watch, KILL_FALLBACK + KILL_TIMEOUT, "victim death (this controller leaves the character)"
+    end)
+    deathChecks("victim")
     step("dead", function() local p = myPawn() say("DEAD pawn=%s class=%s", p and pathOf(p) or "none", p and classOf(p) or "none") end)
     waitPawnChange("revive", 600)
     restoredChecks("revive")
@@ -844,24 +1026,45 @@ local function buildPairHost()
         return function() return #remotePCs() > 0 and pawnOf(remotePCs()[1]) ~= nil and classOf(pawnOf(remotePCs()[1])) == FP end, 600, "the other player's character"
     end)
     wait("victim marks", 90) -- the victim opens its map and marks (it logs VICTIM ready on its own machine)
-    -- No DeathEvent() here: on the remote character it does nothing (see buildPairVictim). The line is the signal:
-    -- pair.ps1 waits for it and writes the victim's kill.txt; the victim kills itself.
+    -- The line is the signal: pair.ps1 waits for it and writes the victim's kill.txt; the victim calls
+    -- CallDamageEvent(1000) on its own pawn (a server RPC: the damage runs here). If the victim's character is still
+    -- alive (Health > 0) and possessed KILL_FALLBACK s later, this host calls CallDamageEvent(1000) on it itself (the
+    -- proven V8.2 path; FALLBACK line). The host is the authority, so its DYING line has the death gate too.
     step("victim: kill", function()
         local target = pawnOf(remotePCs()[1])
         if not target then check(false, "KILL victim target found") return end
         S.killed = pathOf(target)
-        say("KILL victim %s signal (the victim calls DeathEvent on its own pawn)", S.killed)
+        TRACE.t0 = os.clock()
+        traceHooks()
+        say("KILL victim %s signal (the victim calls CallDamageEvent(1000) on its own pawn) guard=%s hp=%s", S.killed, guardOf(target), tostring(hpOf(target)))
     end)
     step("victim dead", function()
+        local fell
+        S.dying = nil
         return function()
+            local t = os.clock() - TRACE.t0
+            traceHooks()
+            local body = found(S.killed)
+            local hp = body and hpOf(body)
+            if not S.dying and body and hp and hp <= 0 and guardOf(body) == "true" then
+                S.dying = t
+                say("DYING victim +%.1f s guard=true hp=%s", t, tostring(hp))
+            end
             local p = pawnOf(remotePCs()[1])
-            return not (p and pathOf(p) == S.killed)
-        end, 120, "the victim's death"
+            local possessed = p ~= nil and pathOf(p) == S.killed
+            if possessed and not fell and t > KILL_FALLBACK and hp and hp > 0 then
+                fell = true
+                local ok, err = pcall(function() body:CallDamageEvent(1000) end)
+                say("KILL victim FALLBACK still alive %.0f s after the signal (hp=%s): the host's CallDamageEvent(1000) ok=%s %s", t, tostring(hp), tostring(ok), ok and "" or tostring(err))
+            end
+            return not possessed
+        end, KILL_FALLBACK + KILL_TIMEOUT, "the victim's death"
     end)
     step("victim state", function()
         local p = pawnOf(remotePCs()[1])
         S.victimAfterDeath = p and classOf(p) or "none"
         say("VICTIM after death pawn class=%s%s", S.victimAfterDeath, S.victimAfterDeath == "BP_ThirdPersonCharacter_C" and " (became a monster: the revive can't run; INCONCLUSIVE)" or "")
+        check(S.victimAfterDeath == SPECTATOR, "SPECTATOR victim the victim's pawn became %s (%s)", SPECTATOR, S.victimAfterDeath)
         return after(10), 15, "settle"
     end)
     step("reinforce", function()
@@ -887,10 +1090,11 @@ local function buildPairHostVictim()
     mark("mark", 2)
     step("paint before", paintEach("before", "paintBefore"))
     drawnAll("before", "paintBefore")
-    kill("death", myPawn)
-    wait("after death", 15)
+    kill("death", myPawn) -- the teammate B is alive: no EOGLock needed
+    wait("after death", 5)
     step("reinforce", function()
         local radio = FindFirstOf("BP_Radio_C")
+        TRACE.t0 = os.clock()
         local ok, err = pcall(function() radio:Reinformant() end)
         say("REINFORCE radio:Reinformant() ok=%s %s", tostring(ok), ok and "" or tostring(err))
     end)
