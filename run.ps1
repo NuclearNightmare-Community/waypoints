@@ -16,6 +16,8 @@
               since a real 0.1.0 core has no UI helpers to build).
   Both first check that deploy.ps1 refuses without -Force (story 1 AC 2 and 3), then deploy with -Force.
   Keeps the log as <workspace>/dumps/<copy>/waypoints/<scenario>.log (ignored by git) and runs check.ps1 on it.
+  Refuses to start while another runner's test or driver mod is enabled in the copy (the workspace's tools/run-guard:
+  the refusal names each and the command that clears it); -AllowOtherDrivers runs anyway.
   Core must already be installed (Nucleus's own deploy.ps1). Steam must be running. Don't type into the game while
   it runs.
   -Target vm runs the scenario in the Hyper-V VM NNB instead (tools/vm/vm-sp.ps1, README "Tests in the VM"): Nucleus
@@ -34,7 +36,8 @@ param(
     [ValidateSet('probe', 'revive', 'death', 'no-core', 'old-core')]
     [string] $Scenario = 'revive',
     [int] $TimeoutSec = 0, # 0: per scenario (probe 600, revive 720, others 480); x1.5 in the VM
-    [ValidateSet('host', 'vm')] [string] $Target = 'host'
+    [ValidateSet('host', 'vm')] [string] $Target = 'host',
+    [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
 )
 $ErrorActionPreference = 'Stop'
 $hostTimeout = switch ($Scenario) { 'probe' { 600 } 'revive' { 720 } default { 480 } }
@@ -45,6 +48,7 @@ $name     = (Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json).n
 $driver   = "${name}Driver"
 $inst     = (Resolve-Path $Instance).Path
 $root     = Split-Path (Split-Path $inst)
+. (Join-Path $root 'tools\run-guard\run-guard.ps1')
 $outDir   = Join-Path $root "dumps\$(Split-Path $inst -Leaf)\$($name.ToLowerInvariant())"
 # Where deploy.ps1 and Break-Core/Restore-Core work: the instance, or with -Target vm the host-side staging folder.
 function Set-DeployTarget([string] $instance) {
@@ -157,14 +161,19 @@ if ($Target -eq 'vm') {
     if (-not (Test-Path $coreDeploy)) { throw "$CoreName's deploy.ps1 not found at $coreDeploy (the VM run installs core from its build/package)." }
     $kept = Join-Path $outDir "$Scenario.vm.log"
     Remove-Item $kept -ErrorAction SilentlyContinue
-    $run = Invoke-NNBSpRun -Instance $inst -TestMod $driver -Mods $CoreName, $driver, $name -Paks "$CoreName.pak" `
-        -EndPattern "\[$driver\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -Prepare {
-            param($stage)
-            & pwsh -NoProfile -NonInteractive -File $coreDeploy -Instance $stage -Staged
-            if ($LASTEXITCODE -ne 0) { throw "$CoreName's deploy.ps1 failed in the stage (exit $LASTEXITCODE)" }
-            Set-DeployTarget $stage
-            Deploy-Scenario
-        }
+    # A refusal of the guard (the VM copy's mods.txt, in the stage) ends the run before anything is installed there.
+    try {
+        $run = Invoke-NNBSpRun -Instance $inst -TestMod $driver -Mods $CoreName, $driver, $name -Paks "$CoreName.pak" `
+            -EndPattern "\[$driver\] END result=" -TimeoutSec (Get-NNBSpTimeout $hostTimeout $TimeoutSec) -LogOut $kept -Prepare {
+                param($stage)
+                $refusal = Get-RunGuardRefusal -Workspace $root -Instance $stage -Owner 'waypoints' -Bypass:$AllowOtherDrivers -Vm
+                if ($refusal) { throw $refusal }
+                & pwsh -NoProfile -NonInteractive -File $coreDeploy -Instance $stage -Staged
+                if ($LASTEXITCODE -ne 0) { throw "$CoreName's deploy.ps1 failed in the stage (exit $LASTEXITCODE)" }
+                Set-DeployTarget $stage
+                Deploy-Scenario
+            }
+    } catch { if ("$($_.Exception.Message)".StartsWith('refused: ')) { Write-Host $_.Exception.Message; exit 1 }; throw }
     $code = 0
     if ($run.Log) {
         & pwsh -NoProfile -NonInteractive -File (Join-Path $here 'check.ps1') -Log $kept -Scenario $Scenario -Target vm
@@ -174,6 +183,9 @@ if ($Target -eq 'vm') {
     exit $code
 }
 
+# A test mod another runner left enabled would fail this run in confusing ways.
+$refusal = Get-RunGuardRefusal -Workspace $root -Instance $inst -Owner 'waypoints' -Bypass:$AllowOtherDrivers
+if ($refusal) { Write-Host $refusal; exit 1 }
 if (Get-Process -Name 'NuclearNightmare*' -ErrorAction SilentlyContinue) { throw 'Nuclear Nightmare is already running (a dev copy or the real game); not launching.' }
 Restore-Core # a run that was killed may have left core broken
 if (-not (Test-Path (Join-Path $modsDir "$CoreName\mod.json"))) { throw "$CoreName is not installed in $modsDir; install it with its own deploy.ps1 first." }

@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Runs Waypoints' unit tests, no game needed: the Lua tests (revive.lua, waypoints.lua with game.lua, main.lua against a
-  fake core and world, the driver's load test) and the PowerShell tests (deploy-lib.ps1 and deploy.ps1 against a fake instance, check.ps1
+  fake core and world, the driver's load test) and the PowerShell tests (deploy-lib.ps1 and deploy.ps1 against a fake instance, run.ps1's run guard, check.ps1
   against synthetic logs). check.ps1 -Scenario unit runs this too.
   Lua: the first of lua, lua5.4, lua54, lua5.3, texlua (MiKTeX's texlua.exe is Lua 5.3) found on PATH; -Lua picks one.
 .EXAMPLE
@@ -28,7 +28,7 @@ try {
         }
     }
     if ($Only -in 'all', 'ps') {
-        foreach ($t in 'deploy_test', 'check_test') {
+        foreach ($t in 'deploy_test', 'check_test', 'run_guard_test') {
             & pwsh -NoProfile -NonInteractive -File "test/unit/$t.ps1"
             if ($LASTEXITCODE -ne 0) { $failed += $t }
         }
