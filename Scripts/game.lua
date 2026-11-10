@@ -211,19 +211,19 @@ function M.journalFlags(journal)
     if not valid(mui) then error("the Journal's MapWidget has no MapUI") end
     local out = { locations = {} }
     local okL, levels = pcall(function() return mui.Levels end)
-    if okL and levels ~= nil then
-        pcall(function()
-            levels:ForEach(function(_, e)
-                pcall(function()
-                    local w = e:get()
-                    if valid(w) then
-                        local name = text(w.Name)
-                        if name and name ~= "" then out.locations[#out.locations + 1] = { widget = w, name = name } end
-                    end
-                end)
+    if not okL or levels == nil then error("the map's MapUI.Levels can't be read (" .. tostring(levels) .. ")") end
+    local okE, errE = pcall(function()
+        levels:ForEach(function(_, e)
+            pcall(function() -- one unreadable flag is skipped, not fatal for the rest
+                local w = e:get()
+                if valid(w) then
+                    local name = text(w.Name)
+                    if name and name ~= "" then out.locations[#out.locations + 1] = { widget = w, name = name } end
+                end
             end)
         end)
-    end
+    end)
+    if not okE then error("the map's MapUI.Levels can't be walked (" .. tostring(errE) .. ")") end
     local okS, sat = pcall(function() return mui.Satelite end)
     if okS and valid(sat) then out.satellite = sat end
     return out

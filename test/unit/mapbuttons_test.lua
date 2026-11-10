@@ -236,9 +236,12 @@ do
     -- a spectator's Journal: Selected still synced, Character left alone
     local W3 = setup()
     W3.j.Character = W3.obj("Spectator_C", "/Game/x.Spectator_C_1")
+    W3.waypoint("location", "Airport", nil, W3.p) -- found through the Journal's own world (no pawn to take it from)
     local L3 = newLog()
     mb.syncOnOpen(game, W3.j, L3)
     ok(rawget(W3.fMed, "Character") == nil and L3.count("MAPSYNC") == 1 and L3.count("^WARN") == 0, "open, no usable pawn: no Character, still synced")
+    ok(W3.fAir.Selected == true and W3.fMed.Selected == false, "open, no usable pawn: Selected from the Journal's world's actors")
+    eq(L3.count("MAPSYNC flags=3 selected=1 satellite=no$"), 1, "open, no usable pawn: MAPSYNC selected=1")
 end
 
 -- ---------------------------------------------------------------- mapbuttons.lua alone: adapter failures
@@ -268,6 +271,25 @@ do
     mb.markAll(G3, W.j, newLog()); eq(n, 1, "mark: one waypoints() read")
     mb.clearAll(G3, W.j, newLog()); eq(n, 2, "clear: one waypoints() read")
     mb.syncOnOpen(G3, W.j, newLog()); eq(n, 3, "open: one waypoints() read")
+    -- MapUI.Levels unreadable, or its ForEach failing: an error, logged as "could not read the map's flags", nothing done
+    for _, how in ipairs({ "read", "walk" }) do
+        local Wl = setup()
+        Wl.waypoint("location", "Airport", nil, Wl.p)
+        local mui = Wl.j.MapWidget.MapUI
+        if how == "read" then
+            local base = getmetatable(mui).__index
+            mui.Levels = nil
+            setmetatable(mui, { __index = function(_, k) if k == "Levels" then error("Levels: boom") end return base[k] end })
+        else mui.Levels = { ForEach = function() error("ForEach: boom") end } end
+        local Lm, Lc, Lo = newLog(), newLog(), newLog()
+        eq(mb.markAll(game, Wl.j, Lm), nil, "Levels " .. how .. " fails: mark nil")
+        eq(mb.clearAll(game, Wl.j, Lc), nil, "Levels " .. how .. " fails: clear nil")
+        eq(mb.syncOnOpen(game, Wl.j, Lo), nil, "Levels " .. how .. " fails: sync nil")
+        eq(Lm.count("^WARN Mark all skipped: could not read the map's flags %(.*MapUI%.Levels can't be"), 1, "Levels " .. how .. " fails: Mark all WARN")
+        eq(Lc.count("^WARN Clear all skipped: could not read the map's flags"), 1, "Levels " .. how .. " fails: Clear all WARN")
+        eq(Lo.count("^WARN map open: could not read the map's flags"), 1, "Levels " .. how .. " fails: open WARN")
+        ok(#Wl.clicks == 0 and liveNamed(Wl, "Airport") == 1, "Levels " .. how .. " fails: nothing clicked or destroyed")
+    end
     -- the real journalFlags on a Journal without a MapWidget raises (caught above as "could not read")
     local bad = W.obj("Journal_C", "/Engine/Transient.Journal_C_bad", { Character = W.p })
     local L4 = newLog()

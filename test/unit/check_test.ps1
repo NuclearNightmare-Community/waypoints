@@ -162,6 +162,8 @@ $buttons = (Start-Log 'buttons') + @(
 Expect $buttons 'buttons' 0 'buttons: passes as written' 'All checks passed'
 Expect $buttons 'buttons' 0 'buttons -Target vm: passes' 'All checks passed' 'vm'
 Expect ($buttons -replace 'MARKALL marked=5 already=2', 'MARKALL marked=4 already=3') 'buttons' 1 'buttons: already must be 2' 'already=2'
+Expect ($buttons -replace 'waypoints=7 flags=6 satellite=yes', 'waypoints=7 flags=7 satellite=yes') 'buttons' 1 'buttons: MARKALL flags must match the map (7 of 6) -> fails' 'MARKALL matches the map'
+Expect ($buttons -replace 'failed=0 waypoints=7 flags=6', 'failed=0 waypoints=6 flags=6') 'buttons' 1 'buttons: MARKALL waypoints must match the map (6 of 7) -> fails' 'MARKALL matches the map'
 Expect ($buttons -replace 'MARKALL marked=5 already=2 failed=0 waypoints=7', 'MARKALL marked=4 already=2 failed=0 waypoints=6') 'buttons' 1 'buttons: marked must match the map (4 of 5) -> fails' 'MARKALL matches the map'
 Expect ($buttons -replace 'satellite=yes \(Weather', 'satellite=no (Weather') 'buttons' 1 'buttons: a satellite marked on a map without its flag -> fails' 'MARKALL matches the map'
 Expect ($buttons -replace 'MARKALL marked=5 already=2 failed=0', 'MARKALL marked=5 already=2 failed=1') 'buttons' 1 'buttons: a failed mark -> fails' 'failed=0'
