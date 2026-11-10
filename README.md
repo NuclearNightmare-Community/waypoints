@@ -126,7 +126,7 @@ With `-Target vm`, core comes from `mods/Nucleus/build/package` and Waypoints pl
 | `no-core`, `old-core` | PASS: `deploy.ps1` refused in one line, then one `[Waypoints]` line naming the cause |
 | `probe` | PASS (6 checks); `construct-every-open=yes flags-rebuilt-each-open=yes`; repairs: respawn and re-running `BeginPlay` paint again, toggling the widget space did not (on V8.1.2 the toggle failed too) |
 | `death` | PASS (6 checks); `painted-while-dead=yes` |
-| `revive` | PASS (14 checks): `RESTORED n=3 (... failed 0 ...)`, then with `clear` `CLEARED n=3 (failed 0)` |
+| `revive` (Tower Island, then `-Map LowIsland`, `Forest`, `Crevasse`) | PASS on all four maps (14 checks each): `RESTORED n=3 (... failed 0 ...)`, then with `clear` `CLEARED n=3 (failed 0)`; with `-Map`, run.ps1 confirmed the travelled map (`MAP <key>`) |
 
 Every map has a satellite flag (`satellite=yes`), every `buttons` run had 14 driver checks and 0 failures, `FLAGCOUNT` matched the table (10/6/7/9), and the flags stayed in step with the actors after the key close and reopen (`FLAGSMATCH`). The first `buttons -Map LowIsland` failed after a good Mark all: the real-mouse click on **Clear all** was made but reached no button (no `clicked` line from core), and the map keys after it no longer closed and reopened the map as expected (three `TIMEOUT`s). The cause is not proven; the host's desktop was in use at the time, which can move the real mouse between the driver's aim and its click. The rerun, unchanged, passed (log of the first try: `buttons-LowIsland.try1.log`). Each map run took about 75-110 s.
 
