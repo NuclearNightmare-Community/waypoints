@@ -62,13 +62,63 @@ function F.new()
             Name = text(kind == "satellite" and "" or name), Character = character, bReplicates = false })
         return a
     end
+    -- A live waypoint actor of `short` in W.map (destroyed ones excluded), as the game's GetAllActorsOfClass sees them.
+    local function liveIn(short)
+        local r = {}
+        for _, o in ipairs(W.all(short)) do if not o._dying and o._world == W.map then r[#r + 1] = o end end
+        return r
+    end
+    W.clicks = {}
+    -- The flags' own click handlers, as the V8.2 decompile has them: a location flag destroys the FIRST live
+    -- LevelWaypointActor_C whose Name matches its own (case-insensitive) and sets Selected false, else spawns one (no
+    -- owner, Character = its own Character, Name = its Name) and sets Selected true; the satellite flag toggles the
+    -- first SatelliteWaypoint_C (GetActorOfClass), spawning at the lever.
+    local function locClick(self)
+        W.clicks[#W.clicks + 1] = self
+        if W.failClick and W.failClick(self) then error("click: boom") end
+        local mine = self.Name:ToString():lower()
+        for _, a in ipairs(liveIn("LevelWaypointActor_C")) do
+            if a.Name:ToString():lower() == mine then
+                a:K2_DestroyActor()
+                self.Selected = false
+                return
+            end
+        end
+        if W.noSpawn then return end
+        local a = W.waypoint("location", self.Name:ToString(), { X = 10, Y = 20, Z = 30 }, self.Character)
+        self.LevelWaypoint = a
+        self.Selected = true
+    end
+    local function satClick(self)
+        W.clicks[#W.clicks + 1] = self
+        if W.failClick and W.failClick(self) then error("click: boom") end
+        local a = liveIn("SatelliteWaypoint_C")[1]
+        if a then a:K2_DestroyActor(); self.Selected = false return end
+        if W.noSpawn then return end
+        W.waypoint("satellite", nil, { X = 7, Y = 7, Z = 7 }, nil)
+        self.Selected = true
+    end
+    local LOC_CLICK = "BndEvt__LevelLocationUI_Button_28_K2Node_ComponentBoundEvent_0_OnButtonClickedEvent__DelegateSignature"
+    local SAT_CLICK = "BndEvt__SateliteUI_Button_28_K2Node_ComponentBoundEvent_0_OnButtonClickedEvent__DelegateSignature"
     function W.flag(name)
         W.n = W.n + 1
-        return W.obj("LevelLocationUI_C", "/Engine/Transient.GameEngine_1:BP_GameInstance_C_1.LevelLocationUI_C_" .. W.n, { Name = text(name), Selected = true })
+        return W.obj("LevelLocationUI_C", "/Engine/Transient.GameEngine_1:BP_GameInstance_C_1.LevelLocationUI_C_" .. W.n, { Name = text(name), Selected = true, [LOC_CLICK] = locClick })
     end
     function W.satFlag()
         W.n = W.n + 1
-        return W.obj("SateliteUI_C", "/Engine/Transient.GameEngine_1:BP_GameInstance_C_1.SateliteUI_C_" .. W.n, { Selected = true })
+        return W.obj("SateliteUI_C", "/Engine/Transient.GameEngine_1:BP_GameInstance_C_1.SateliteUI_C_" .. W.n, { Selected = true, [SAT_CLICK] = satClick })
+    end
+    -- A TArray as UE4SS hands it to Lua: ForEach(fn(index, elem)) with elem:get().
+    function W.tarray(list)
+        return { ForEach = function(_, fn) for i, x in ipairs(list) do fn(i, { get = function() return x end }) end end, _list = list }
+    end
+    -- An open Journal_C: MapWidget.MapUI.Levels (the location flags) and .Satelite (nil: none on this map), Character.
+    function W.journal(levels, sat, character)
+        W.n = W.n + 1
+        local base = "/Engine/Transient.GameEngine_1:BP_GameInstance_C_1.Journal_C_" .. W.n
+        local mui = W.obj("MapUI_C", base .. ".WidgetTree.MapWidget.WidgetTree.MapUI", { Levels = W.tarray(levels or {}), Satelite = sat })
+        local mw = W.obj("MapWidget_C", base .. ".WidgetTree.MapWidget", { MapUI = mui })
+        return W.obj("Journal_C", base, { MapWidget = mw, Character = character })
     end
     function W.hud(player, owningPawn)
         W.n = W.n + 1

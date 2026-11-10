@@ -26,6 +26,11 @@
 --            whether the waypoints still paint while spectating.
 --   Kills are judged by the game's own signals (DIED: Health <= 0 and NNDeathFadeLibrary:CanBeginTerminalDeathEffects;
 --   SPECTATOR: the controller's pawn ~12 s later), never by the HUD. TRACE and HUDSTATE lines log the death path.
+--   buttons: story 3, solo host: 2 location flags marked by their own click (no satellite), the lobby countdown cut,
+--            the map opened by the real key IA_Map is bound to, Waypoints' Mark all clicked with the real mouse: one
+--            live waypoint actor per flag (and the satellite), every flag Selected; Clear all: none left, none
+--            Selected; the map closed and reopened by the key: every flag's Selected matches its actor (FLAGSMATCH).
+--            Waypoints' own MARKALL / CLEARALL / MAPSYNC lines are judged by check.ps1 against the EXPECT line.
 --   no-core, old-core: in a match: nothing from Waypoints (check.ps1 judges its one line).
 --   pair-victim:     (B, a client in the VM) marks, dies on the host's signal (kill.txt: CallDamageEvent(1000) on its
 --                    own pawn), is revived by the host's radio; then the revive 1 checks on the client.
@@ -33,7 +38,8 @@
 --                    itself if B is still alive 30 s later), waits for B's death, calls the radio's Reinformant (the
 --                    computer's "call reinforcement"), waits for B's new character.
 --   pair-hostvictim: (A, the host, modded) marks, dies, calls the radio's Reinformant itself, then the revive checks.
--- Keys it can't press itself (Enter for touchdown) go to run.ps1 through request.txt / done.txt next to this file.
+-- Keys it can't press itself (Enter for touchdown, the map key) and real mouse clicks ("click x y", desktop pixels) go
+-- to run.ps1 through request.txt / done.txt next to this file.
 -- Never keeps a UObject across steps: only paths and names, re-found each step.
 local CORE = "Nucleus"
 local WAYPOINTS = "Waypoints"
@@ -434,9 +440,9 @@ local function enterMatch(phase)
     waitHud(phase, 90)
 end
 
--- Opens the map, clicks n location flags and the satellite flag through their own handlers, closes it; checks one
--- waypoint actor per clicked waypoint.
-local function mark(phase, n)
+-- Opens the map, clicks n location flags and (unless noSat) the satellite flag through their own handlers, closes it;
+-- checks one waypoint actor per clicked waypoint.
+local function mark(phase, n, noSat)
     step(phase .. ": open map", function() openMap(phase) return after(2), 5, "map open" end)
     step(phase .. ": click", function()
         local list, sat = flags()
@@ -450,7 +456,7 @@ local function mark(phase, n)
             if ok then S.marked[#S.marked + 1] = name end
             say("CLICK %s '%s' ok=%s %s", phase, tostring(name), tostring(ok), ok and "" or tostring(err))
         end
-        if sat then
+        if sat and not noSat then
             local ok, err = pcall(function() sat[SAT_CLICK](sat) end)
             if ok then S.marked[#S.marked + 1] = "Satellite" end
             say("CLICK %s 'Satellite' ok=%s %s", phase, tostring(ok), ok and "" or tostring(err))
@@ -462,7 +468,7 @@ local function mark(phase, n)
     step(phase .. ": marked", function()
         local wp, total = waypoints()
         say("WAYPOINTS %s total=%d %s", phase, total, describe(wp))
-        local one = #S.marked == n + 1
+        local one = #S.marked == n + (noSat and 0 or 1)
         for _, name in ipairs(S.marked) do one = one and wp[name] ~= nil and wp[name].n == 1 end
         check(one and total == #S.marked, "MARKED %s %d waypoints, one waypoint actor each (%s)", phase, #S.marked, table.concat(S.marked, ","))
         paintHook()
@@ -785,6 +791,144 @@ local function realRevive(phase)
     holdMatch(phase, false)
 end
 
+-- ---------------------------------------------------------------- buttons (story 3): Mark all / Clear all by real clicks
+-- The map opened and closed by the real key IA_Map is bound to (posted to the game window by run.ps1, like Enter), and
+-- Waypoints' buttons clicked with the real mouse (run.ps1 "click x y" at the button's centre). The buttons are found as
+-- core draws them: on the map page's root canvas (Journal_C.MapWidget's RootWidget) a WBP_<Core>Panel tagged
+-- <core>:Waypoints:waypoints, its HBox holding WBP_<Core>Button widgets tagged <core>:Waypoints:markAll / clearAll
+-- (CoreTag; core's text.lua tagOf). Screen rectangles from core's <Core>_AbsTopLeft / _AbsBottomRight on its ModActor's
+-- class default object, as core's own button tests do (SkelTest clickOn).
+local ACTOR_CDO = "/Game/Mods/" .. CORE .. "/ModActor.Default__ModActor_C"
+local function tagFor(id) return CORE:lower() .. ":" .. WAYPOINTS .. ":" .. id end
+local function coreTag(w) local ok, t = pcall(function() return w.CoreTag:ToString() end) return ok and t or nil end
+local function childTagged(container, tag)
+    local hit, n = nil, 0
+    pcall(function()
+        for i = 0, container:GetChildrenCount() - 1 do
+            local c = container:GetChildAt(i)
+            if valid(c) and coreTag(c) == tag then n = n + 1; hit = hit or c end
+        end
+    end)
+    return hit, n
+end
+-- The local player's Journal in the viewport (a new Journal_C on every open); nil when the map is closed.
+local function openJournal()
+    for _, j in ipairs(FindAllOf("Journal_C") or {}) do
+        if valid(j) and not pathOf(j):find("Default__", 1, true) then
+            local ok, v = pcall(function() return j:IsInViewport() end)
+            if ok and v then return j end
+        end
+    end
+    return nil
+end
+local function buttonWidget(id)
+    local j = openJournal()
+    local okC, canvas = pcall(function() return j.MapWidget.WidgetTree.RootWidget end)
+    if not (j and okC and valid(canvas)) then return nil, "no map canvas" end
+    local panel, np = childTagged(canvas, tagFor("waypoints"))
+    if not panel then return nil, "no Waypoints panel on the map page" end
+    local okB, box = pcall(function() return panel.HBox end)
+    if not (okB and valid(box)) then return nil, "the panel has no HBox" end
+    local b, nb = childTagged(box, tagFor(id))
+    if not b then return nil, "no '" .. id .. "' button in the panel's HBox" end
+    return b, nil, np, nb
+end
+local function screenRect(w)
+    local cdo = found(ACTOR_CDO)
+    if not (cdo and valid(w)) then return nil end
+    local ok, r = pcall(function()
+        local a, b = cdo[CORE .. "_AbsTopLeft"](cdo, w), cdo[CORE .. "_AbsBottomRight"](cdo, w)
+        return { l = a.X, t = a.Y, r = b.X, b = b.Y }
+    end)
+    return ok and r or nil
+end
+
+-- The game state's lobby countdown, cut to 2 s on this (listen server) host: the character opens the map only when
+-- LobbyMinutes and LobbySeconds are both 0 (core's SkelTest lobbyOver).
+local function lobbyOver(phase)
+    step(phase .. ": end the lobby", function()
+        local gs = GS():GetGameState(pc())
+        if not valid(gs) then check(false, "LOBBY %s game state found", phase) return end
+        local m, s = gs.LobbyMinutes, gs.LobbySeconds
+        say("LOBBY %s countdown %s:%s; set to 0:02", phase, tostring(m), tostring(s))
+        if (tonumber(m) or 0) > 0 or (tonumber(s) or 0) > 2 then pcall(function() gs.LobbyMinutes = 0; gs.LobbySeconds = 2 end) end
+        return function()
+            local g = GS():GetGameState(pc())
+            return valid(g) and (tonumber(g.LobbyMinutes) or 1) <= 0 and (tonumber(g.LobbySeconds) or 1) <= 0
+        end, 20, phase .. " lobby countdown over"
+    end)
+    step(phase .. ": lobby settle", function() return after(3), 5, "settle" end)
+end
+-- The key IA_Map is bound to, from IMC_Default (a capital letter), else M (core's SkelTest readMapKey).
+local function readMapKey()
+    step("map key", function()
+        local key, all = nil, {}
+        local ok, err = pcall(function()
+            local imc = StaticFindObject("/Game/FirstPerson/Input/IMC_Default.IMC_Default")
+            if not valid(imc) then error("IMC_Default not loaded") end
+            imc.Mappings:ForEach(function(_, e)
+                local m = e:get()
+                local a = m.Action
+                if valid(a) and pathOf(a):find("IA_Map.IA_Map", 1, true) then
+                    local k = m.Key.KeyName:ToString()
+                    all[#all + 1] = k
+                    if not key and k:match("^[A-Z]$") then key = k end
+                end
+            end)
+        end)
+        S.mapKey = key or "M"
+        say("MAPKEY %s (IA_Map keys in IMC_Default: %s%s)", S.mapKey, table.concat(all, ", "), ok and "" or ("; read failed: " .. tostring(err)))
+        check(key ~= nil, "MAPKEY IA_Map is bound to the letter %s in IMC_Default", S.mapKey)
+    end)
+end
+-- The map opened (or closed) by the real key; S.journalPath is the open Journal's path (for flags()).
+local function keyMap(phase, open)
+    step(phase .. (open and ": open by key" or ": close by key"), function()
+        say("MAPKEY %s pressing %s to %s the map", phase, S.mapKey, open and "open" or "close")
+        return request("key " .. S.mapKey), 30, phase .. " map key served"
+    end)
+    step(phase .. (open and ": opened" or ": closed"), function()
+        return function()
+            local j = openJournal()
+            if open and j then S.journalPath = pathOf(j) return true end
+            return not open and j == nil
+        end, 10, phase .. (open and " the Journal in the viewport" or " the Journal out of the viewport")
+    end)
+    -- Core's poller sees the open within 500 ms and attaches the buttons; Waypoints' MAPSYNC runs right after.
+    step(phase .. ": settle", function() return after(1.5), 4, "map settle" end)
+end
+-- A real mouse click on Waypoints' button `id`, then a pause for the hook and the action.
+local function clickButton(phase, id)
+    step(phase .. ": click " .. id, function()
+        local w, why, np, nb = buttonWidget(id)
+        local r = w and screenRect(w)
+        if not check(r ~= nil and r.r > r.l and r.b > r.t, "BPOINT %s '%s' is on the map page with a screen rectangle %s%s", phase, id,
+            r and string.format("(%.0f,%.0f)-(%.0f,%.0f)", r.l, r.t, r.r, r.b) or "?", why and (" (" .. why .. ")") or "") then return end
+        check(np == 1 and nb == 1, "BONE %s one Waypoints panel and one '%s' button on the map page (%d, %d)", phase, id, np or 0, nb or 0)
+        local x, y = math.floor((r.l + r.r) / 2 + 0.5), math.floor((r.t + r.b) / 2 + 0.5)
+        say("BCLICKREQ %s clicking '%s' at (%d,%d)", phase, id, x, y)
+        return request(string.format("click %d %d", x, y)), 40, phase .. " click served"
+    end)
+    step(phase .. ": settle " .. id, function() return after(1.5), 4, "click settle" end)
+end
+-- Every flag widget of the open map (not only the first of each name) and its Selected.
+local function allFlagStates()
+    local m = mapUI()
+    local out = {}
+    if m then
+        for _, f in ipairs(items(m.Levels)) do out[#out + 1] = { name = text(f.Name) or "?", selected = f.Selected == true } end
+        local ok, s = pcall(function() return m.Satelite end)
+        if ok and valid(s) then out[#out + 1] = { name = "Satellite", selected = s.Selected == true } end
+    end
+    return out
+end
+local function distinctNames()
+    local list, sat = flags()
+    local names = {}
+    for _, f in ipairs(list) do names[#names + 1] = text(f.Name) end
+    return names, sat ~= nil
+end
+
 -- ---------------------------------------------------------------- scenarios
 local function buildProbe()
     enterMatch("match1")
@@ -966,6 +1110,66 @@ local function buildDeath()
     paintWhileDead("dead")
 end
 
+-- Story 3: 2 flags marked by their own click, then the map opened by the real key, Mark all and Clear all clicked with
+-- the real mouse, each checked against the world; then the map closed and reopened by the key and checked again.
+local function buildButtons()
+    enterMatch("match1")
+    lobbyOver("match1")
+    mark("mark", 2, true)
+    readMapKey()
+    keyMap("buttons", true)
+    step("buttons: expect", function()
+        local names, sat = distinctNames()
+        S.flagNames, S.hasSat = names, sat
+        S.expectMarked = #names - 2 + (sat and 1 or 0)
+        say("EXPECT buttons marked=%d flags=%d satellite=%s (%s)", S.expectMarked, #names, sat and "yes" or "no", table.concat(names, ","))
+        check(#names > 2, "FLAGS buttons the map has %d location flags", #names)
+    end)
+    clickButton("markall", "markAll")
+    step("markall: check", function()
+        local wp, total = waypoints()
+        say("WAYPOINTS markall total=%d %s", total, describe(wp))
+        local one, miss = true, {}
+        for _, n in ipairs(S.flagNames) do if not (wp[n] and wp[n].n == 1) then one = false; miss[#miss + 1] = n end end
+        if S.hasSat and not (wp.Satellite and wp.Satellite.n == 1) then one = false; miss[#miss + 1] = "Satellite" end
+        local want = #S.flagNames + (S.hasSat and 1 or 0)
+        check(one and total == want, "ALLMARKED markall one live waypoint actor per flag%s (%d actors, want %d)%s", S.hasSat and " and the satellite" or "",
+            total, want, #miss > 0 and (" not: " .. table.concat(miss, ",")) or "")
+        local states, off = allFlagStates(), {}
+        for _, f in ipairs(states) do if not f.selected then off[#off + 1] = f.name end end
+        check(#states > 0 and #off == 0, "ALLSELECTED markall every flag Selected (%d widgets)%s", #states, #off > 0 and (" not: " .. table.concat(off, ",")) or "")
+        local rep = true
+        for _, e in pairs(wp) do rep = rep and e.replicates == false end
+        check(rep, "LOCAL markall every waypoint actor has bReplicates=false")
+    end)
+    clickButton("clearall", "clearAll")
+    step("clearall: check", function()
+        local wp, total = waypoints()
+        check(total == 0, "ALLCLEARED clearall no live waypoint actor left (%d: %s)", total, describe(wp))
+        local states, on = allFlagStates(), {}
+        for _, f in ipairs(states) do if f.selected then on[#on + 1] = f.name end end
+        check(#states > 0 and #on == 0, "NONESELECTED clearall no flag Selected (%d widgets)%s", #states, #on > 0 and (" still: " .. table.concat(on, ",")) or "")
+    end)
+    keyMap("close", false)
+    keyMap("reopen", true)
+    step("reopen: flags", function()
+        local wp = waypoints()
+        local up = {}
+        for name in pairs(wp) do up[#up + 1] = name end
+        table.sort(up)
+        local states, sel, mism = allFlagStates(), {}, {}
+        for _, f in ipairs(states) do
+            if f.selected then sel[#sel + 1] = f.name end
+            if f.selected ~= (wp[f.name] ~= nil) then mism[#mism + 1] = f.name end
+        end
+        table.sort(sel)
+        say("FLAGS reopen n=%d selected=%s actors=%s", #states, table.concat(sel, ","), table.concat(up, ","))
+        check(#states > 0 and #mism == 0, "FLAGSMATCH reopen every flag's Selected matches its waypoint actor (selected: %s; actors: %s)%s",
+            table.concat(sel, ","), table.concat(up, ","), #mism > 0 and (" differ: " .. table.concat(mism, ",")) or "")
+    end)
+    keyMap("end", false)
+end
+
 local function buildNoWaypoints()
     enterMatch("match1")
     wait("watch", 10)
@@ -1132,7 +1336,7 @@ local function tick()
     busy = false
 end
 
-local build = ({ probe = buildProbe, revive = buildRevive, death = buildDeath, ["no-core"] = buildNoWaypoints, ["old-core"] = buildNoWaypoints,
+local build = ({ probe = buildProbe, revive = buildRevive, death = buildDeath, buttons = buildButtons, ["no-core"] = buildNoWaypoints, ["old-core"] = buildNoWaypoints,
                  ["pair-victim"] = buildPairVictim, ["pair-host"] = buildPairHost, ["pair-hostvictim"] = buildPairHostVictim })[SCENARIO]
 if not build then
     say("END result=FAIL checks=0 failures=1 reason=unknown-scenario %s", SCENARIO)

@@ -1,10 +1,21 @@
 # Waypoints
 
-A Nuclear Nightmare mod (UE4SS Lua, on the Nucleus core) that brings your Journal map waypoints back after a revive.
+A Nuclear Nightmare mod (UE4SS Lua, on the Nucleus core) for your Journal map waypoints: **Mark all** and **Clear all** buttons on the map, and your waypoints back after a revive.
 
-**0.1.0 = the revive fix only** (spec `_bmad-output/specs/spec-markers-v1/` in the workspace, story 2 plus the repo, bootstrap, deploy and check parts it needs). The **Mark all / Clear all** buttons come in a later release, on core's panels and buttons.
+**0.2.0** (spec `_bmad-output/specs/spec-markers-v1/` in the workspace, stories 2 and 3): the revive fix plus the two buttons, on Nucleus 0.5.0 or newer, game V8.2.1 (build 26512322). It is the first release.
 
 ## What it does
+
+### Mark all and Clear all
+
+Open the Journal map: two buttons sit in its bottom-right corner.
+
+- **Mark all** puts a waypoint up for every location flag of the current map and the satellite flag (when the map has one). Flags that already had a waypoint keep it and get no second one.
+- **Clear all** takes every waypoint down: no flag stays selected, nothing is left on screen.
+
+Each press goes through the flags' own click handlers, so the game spawns, names and removes the waypoints itself, exactly as if you had clicked each flag. A flag counts as selected only when its waypoint really exists, so the map and the screen agree after every press, and after closing and reopening the map (each time the map opens, Waypoints sets every flag's selection from the waypoints that exist).
+
+### After a revive
 
 In the stock game, clicking a location flag (or the satellite flag) on the Journal map puts a waypoint on screen. After you die and are revived at the radio, the map still shows those flags as selected but the waypoints are gone; the only way back is to click each flag twice. The waypoint actors survive the death, but the death and the revive both call `RemoveAllWidgets`, which also clears the layer the on-screen waypoints draw in.
 
@@ -17,7 +28,7 @@ It works the same for the host, a client or a solo player, also when nobody else
 
 ## Install
 
-Needs Nucleus 0.5.0 or newer installed and enabled in the same copy (`mods/Nucleus/deploy.ps1`); 0.5.0 is the first core that reads the `>=` need.
+Needs Nucleus 0.5.0 or newer installed and enabled in the same copy (`mods/Nucleus/deploy.ps1`): the buttons use its panels, buttons and Journal events, and 0.5.0 is the version Waypoints is verified on.
 
 ```powershell
 $copy = 'C:\...\nuclear-nightmare\game-instances\<copy>'   # absolute, also from a worktree
@@ -26,13 +37,17 @@ $copy = 'C:\...\nuclear-nightmare\game-instances\<copy>'   # absolute, also from
 ./deploy.ps1 -Instance $copy -Remove
 ```
 
-`deploy.ps1` refuses (one line, exit 1) when Nucleus is missing, disabled, older than 0.2.0 (`dependsOn` `>=0.2.0`) or has a `compat.floor` above it (the `>=` form is read by Nucleus 0.5.0 and newer, core story 18); it writes `Waypoints : 1` right below Nucleus's line in `mods.txt` (above `Keybinds : 1`) and generates `Scripts/settings.lua` from `mod.json`. Without a compatible core, the mod logs exactly one `[Waypoints]` line naming the cause and does nothing.
+`deploy.ps1` refuses (one line, exit 1) when Nucleus is missing, disabled, older than 0.5.0 (`dependsOn` `>=0.5.0`) or has a `compat.floor` above it; it writes `Waypoints : 1` right below Nucleus's line in `mods.txt` (above `Keybinds : 1`) and generates `Scripts/settings.lua` from `mod.json`. Without a compatible core, the mod logs exactly one `[Waypoints]` line naming the cause and does nothing.
 
 ## The setting
 
 `onRevive` (`restore` | `clear`, default `restore`, changeable anytime). Until core's settings service exists it lives in `Mods/Waypoints/Scripts/settings.lua`; Waypoints reads it again at every revive, so editing that file (`return { onRevive = "clear" }`) takes effect at the next revive without a restart. `deploy.ps1 -OnRevive` writes it while the game is closed.
 
 ## Hand check (about 5 minutes; needs a second player for the revive)
+
+Buttons (solo is enough): open the map, click two flags yourself, then **Mark all**: every flag is selected and has one waypoint on screen (the two you clicked keep theirs). **Clear all**: no flag selected, no waypoint. Close and reopen the map: still none. The log has one `MARKALL` and one `CLEARALL` line, both with `failed=0`.
+
+Revive:
 
 1. Deploy core and Waypoints, launch with `tools/launch.ps1`, start a friends-only match with a second player.
 2. Open the map, click two location flags and the satellite flag. Three waypoints show on screen.
@@ -44,13 +59,14 @@ $copy = 'C:\...\nuclear-nightmare\game-instances\<copy>'   # absolute, also from
 
 ## How it works
 
-- `Scripts/main.lua`: the dependent bootstrap (`connect{ mod = "Waypoints", need = ">=0.2.0" }`), settings, and the wiring: one `core.ui.hud.watch` watcher and a `LoadMap` post-hook. No loop, no per-tick work.
+- `Scripts/main.lua`: the dependent bootstrap (`connect{ mod = "Waypoints", need = ">=0.5.0" }`), settings, and the wiring: one `core.ui.hud.watch` watcher, a `LoadMap` post-hook, and for the buttons a core panel (`id = "waypoints"`, `{ host = "journal", corner = "bottom-right" }`, horizontal) with the buttons `markAll` and `clearAll`, created before one `core.ui.journal.watch` watcher (so core has attached them when Waypoints' `opened` runs). The open Journal crosses from its `opened` event to a press only as core's weak handle (`core.ref`, freed on `closed`/`lost`); a press re-derefs it. Without core's panel, button or Journal API it logs one ERROR, the revive fix keeps running and `READY` says `buttons=no`. No loop, no per-tick work.
+- `Scripts/mapbuttons.lua` (pure, over the same adapter): **Mark all** reads the open Journal's flags (`MapWidget.MapUI.Levels`, `.Satelite`) and the live waypoint actors (one `FindAllOf` pass), gives every location flag the Journal's character (it must be a live `BP_FirstPersonCharacter_C`, else one WARN and nothing), and clicks each flag key without an actor once (duplicate-name flags share the first widget). **Clear all** clicks each flag once per live actor of its key (the game's handler removes only the first match), stops if a click removes nothing, and destroys any actor still alive or without a flag on this map directly. Both then set every flag's `Selected` from the actors. The map-open sync does the character and `Selected` part only.
 - `Scripts/revive.lua` (pure): decides from HUD events alone. On each `attached` it reads the local pawn (the HUD's own `Player`, else its owning player's pawn). A **revive** is the pawn becoming a new `BP_FirstPersonCharacter_C` in the same world after the HUD was lost (the death's `RemoveAllWidgets`). Never `ReceivePossess` (it runs only where the controller has authority). A spectator or monster pawn is not a revive. A new pawn with no HUD loss in between is a **rebound** (restore only, never clear). Within 15 s after a revive, the new pawn's HUD coming back once more (a client's revive multicast can land after the new HUD) re-runs the action (**again**). A new world forgets everything.
 - At the first HUD loss (the death) it takes a **snapshot** of the waypoints you have up (name, kind, location: plain data).
 - `Scripts/waypoints.lua` (pure, over an adapter): **restore** spawns a fresh waypoint actor for every waypoint you had up (every live actor, plus any snapshot entry whose actor vanished), bound to the new pawn, and only then destroys the old one, so a failed spawn leaves the game's own state; duplicates collapse to one. **Clear** destroys them all. Both then set every flag's `Selected` from the actors (truth is the actor, not the flag) and bind the flags to the new pawn.
-- `Scripts/game.lua`: the only file that touches the game. It spawns the way the flag's own click does (`BeginDeferredActorSpawnFromClass` with no owner, `Character` and `Name` set before `FinishSpawningActor`, so `BeginPlay` builds the widget), and filters out actors being destroyed (`IsActorBeingDestroyed`) that `FindAllOf` still returns until GC. The action runs 500 ms after the HUD event through `ExecuteInGameThreadWithDelay` (from the game thread), with the pawn carried as a core weak handle.
+- `Scripts/game.lua`: the only file that touches the game (also the Journal's flags and character, the flags' click handlers and their `Selected`/`Character`). It spawns the way the flag's own click does (`BeginDeferredActorSpawnFromClass` with no owner, `Character` and `Name` set before `FinishSpawningActor`, so `BeginPlay` builds the widget), and filters out actors being destroyed (`IsActorBeingDestroyed`) that `FindAllOf` still returns until GC. The action runs 500 ms after the HUD event through `ExecuteInGameThreadWithDelay` (from the game thread), with the pawn carried as a core weak handle.
 
-Log lines (`[Waypoints]`): `READY onRevive=...`, `PAWN first ...`, `LOST pawn=... snapshot n=...`, `REVIVE pawn=... was=... snapshot=... onRevive=...`, `REBOUND ...`, `AGAIN ...`, `RESTORE <kind> '<name>' respawned bReplicates=false via ...`, `RESTORED n=...`, `CLEAR ...`, `CLEARED n=...`.
+Log lines (`[Waypoints]`): `READY onRevive=... buttons=yes|no`, `MAPSYNC flags=<n> selected=<n> satellite=yes|no|none` (each map open), `MARK location '<name>'` / `MARK satellite`, `MARKALL marked=<n> already=<n> failed=<n> waypoints=<n> flags=<n> satellite=yes|no|none`, `CLEAR location '<name>'` / `CLEAR satellite`, `CLEARALL cleared=<n> direct=<n> failed=<n> waypoints=<n> flags=<n>` (`waypoints`: live waypoint actors after the press; `flags`: distinct location flag names), `WARN Mark all skipped: the map is not open` (and the same for a character that isn't a live first-person one), `PAWN first ...`, `LOST pawn=... snapshot n=...`, `REVIVE pawn=... was=... snapshot=... onRevive=...`, `REBOUND ...`, `AGAIN ...`, `RESTORE <kind> '<name>' respawned bReplicates=false via ...`, `RESTORED n=...`, `CLEAR ...`, `CLEARED n=...`.
 
 ## Tests
 
@@ -60,7 +76,7 @@ Log lines (`[Waypoints]`): `READY onRevive=...`, `PAWN first ...`, `LOST pawn=..
 ./test.ps1            # or ./check.ps1 -Scenario unit
 ```
 
-Lua (`texlua`, MiKTeX's Lua 5.3, or any Lua 5.3/5.4): `revive_test` (the detector against fake HUD events and pawn paths), `waypoints_test` (snapshot, restore, clear and `game.lua` over a fake UE4SS world, failure paths), `main_test` (bootstrap, settings both ways and changed between revives, the whole HUD-event-to-restore path over a fake core), `driver_test` (the test driver loads every scenario). PowerShell: `deploy_test` (version needs, mods.txt, enum settings, deploy.ps1 end to end on a fake copy), `check_test` (check.ps1 against synthetic logs, each passing as written and failing after one change).
+Lua (`texlua`, MiKTeX's Lua 5.3, or any Lua 5.3/5.4): `revive_test` (the detector against fake HUD events and pawn paths), `waypoints_test` (snapshot, restore, clear and `game.lua` over a fake UE4SS world, failure paths), `mapbuttons_test` (Mark all, Clear all and the map-open sync with the real `game.lua` over fake flags that click as the V8.2 decompile does: every row of story 3's I/O matrix), `main_test` (bootstrap, settings both ways and changed between revives, the whole HUD-event-to-restore path, and the buttons' wiring over a fake core: panel and button arguments, watch order, the Journal's weak handle, presses with no map open), `driver_test` (the test driver loads every scenario). PowerShell: `deploy_test` (version needs, mods.txt, enum settings, deploy.ps1 end to end on a fake copy), `check_test` (check.ps1 against synthetic logs, each passing as written and failing after one change).
 
 ### Single-player scenarios (`run.ps1`, host or VM)
 
@@ -70,20 +86,27 @@ The test driver `test/WaypointsDriver` (installed only by `deploy.ps1 -Test`, ne
 |---|---|
 | `probe` | Story 2's first checks: does `MapUI_C`'s `Construct` run on every map open (the Journal opened and closed from Lua four times)? The bug reproduced (`RemoveAllWidgets` stops painting); which repair paints again: toggling the widget space, re-running the actor's `BeginPlay`, or respawning (Waypoints' way); destroyed actors not counted alive |
 | `revive` | A revive through the game's own code, solo: the game state's `EOGLock` holds the match (a stand-in for a living teammate), the player really dies (the driver's kill, below), then `BP_Radio_C:ReinforceSpecficPlayer(dead body)` spawns and possesses a new character as a reinforcement does; `EOGLock` is released after it. `restore`: one actor per waypoint, bound to the new pawn, painted, `bReplicates=false`, flags match; same Journal instance after the revive? Then the driver switches `settings.lua` to `clear` and revives again: nothing left |
+| `buttons` | Story 3, solo: 2 location flags marked by their own click (not the satellite), the map opened by the real key `IA_Map` is bound to (read from `IMC_Default`, posted to the game window like Enter), **Mark all** clicked with the real mouse (the button found on the map page by core's tag, its centre from core's `Nucleus_AbsTopLeft`/`_AbsBottomRight`): one live waypoint actor per flag and the satellite, every flag `Selected`, `bReplicates=false`; **Clear all**: none left, none `Selected`; the map closed and reopened by the key: every flag's `Selected` matches its actor (`FLAGSMATCH`). `check.ps1` also requires one `MARKALL` with `already=2 failed=0` whose `marked`, `flags` and `waypoints` match the driver's `EXPECT` line (distinct flag names - 2 + 1 for a satellite flag), one `CLEARALL` with `failed=0 waypoints=0`, and a `MAPSYNC` after it. The clicks take the mouse for a moment on the host (the game window is brought to the front) |
 | `death` | Death to spectator, solo: nothing happens, the waypoint actors survive (the snapshot at the death is a soft check: since V8.1.3 the game's managed death keeps the HUD). Also answers whether the waypoints paint while dead (`ANSWER painted-while-dead`) |
 | `no-core`, `old-core` | One `[Waypoints]` line naming the cause; `deploy.ps1` refuses first |
 
 ```powershell
 $copy = 'C:\...\nuclear-nightmare\game-instances\<copy>'
 ./run.ps1 -Instance $copy -Scenario probe                 # host: only with no other game running
+./run.ps1 -Instance $copy -Scenario buttons               # host: don't touch the mouse while it runs (real clicks)
 ./run.ps1 -Instance $copy -Scenario revive -Target vm     # in the Hyper-V VM (tools/vm/README.md, "Single-player tests in the VM")
 ./run.ps1 -Instance $copy -Scenario death -Target vm
 ./check.ps1 -Log <workspace>\dumps\<copy>\waypoints\probe.vm.log -Scenario probe -Target vm
 ```
 
-**The driver's kill (V8.1.5+).** Since V8.1.5 `DeathEvent()` does nothing on a pawn that took no real damage (its `MoreDeathFX` starts with the native gate `NNDeathFadeLibrary:CanBeginTerminalDeathEffects`, false while Health > 0), so the driver kills with the game's own damage: one `CallDamageEvent(1000)` on the host, then the game's whole death, which takes about 12 s (the fade). It judges the death by the game's signals, never the HUD: `DIED` (right away, Health <= 0 and the gate open, called as a UFunction on `Default__NNDeathFadeLibrary`) and `SPECTATOR` (the controller's pawn is `Spectator_C`, about 12 s later); step timeout 60 s. Only if the character is still possessed after 30 s does it set Health 0 and call `DeathEvent()` (a `FALLBACK` line, a soft check). `TRACE` and `HUDSTATE` lines log the death path; `PAINTLINE` logs the old waypoint's paints through the reinforcement. Ported from the V8.1.5 runs (`dumps/v8.1.5-build26357084/markers/revive.vm.log`, PASS); not yet run on V8.2.1.
+**The driver's kill (V8.1.5+).** Since V8.1.5 `DeathEvent()` does nothing on a pawn that took no real damage (its `MoreDeathFX` starts with the native gate `NNDeathFadeLibrary:CanBeginTerminalDeathEffects`, false while Health > 0), so the driver kills with the game's own damage: one `CallDamageEvent(1000)` on the host, then the game's whole death, which takes about 12 s (the fade). It judges the death by the game's signals, never the HUD: `DIED` (right away, Health <= 0 and the gate open, called as a UFunction on `Default__NNDeathFadeLibrary`) and `SPECTATOR` (the controller's pawn is `Spectator_C`, about 12 s later); step timeout 60 s. Only if the character is still possessed after 30 s does it set Health 0 and call `DeathEvent()` (a `FALLBACK` line, a soft check). `TRACE` and `HUDSTATE` lines log the death path; `PAINTLINE` logs the old waypoint's paints through the reinforcement. Ported from the V8.1.5 runs (`dumps/v8.1.5-build26357084/markers/revive.vm.log`, PASS); `revive` passes on V8.2.1 (below).
 
 With `-Target vm`, core comes from `mods/Nucleus/build/package` and Waypoints plus the driver from this repo's `deploy.ps1 -Staged`; the VM copy is put back afterwards. Every Waypoints scenario may run in the VM (none judges timing). Take the workspace's `dumps/vm.lock` around VM runs while other agents share the VM.
+
+**Results on the host (V8.2.1 build 26512322, Nucleus 0.5.0, 2026-11-10; logs `dumps/v8.2-build26512322/waypoints/{buttons,revive}.log`): `buttons` and `revive` pass.**
+- `buttons` (Tower Island, 6 location flags and the satellite flag): `MARKALL marked=5 already=2 failed=0 waypoints=7 flags=6 satellite=yes`, one actor per flag, all 7 flag widgets selected; `CLEARALL cleared=7 direct=0 failed=0 waypoints=0 flags=6`, none selected; after the key close and reopen `MAPSYNC flags=6 selected=0 satellite=no` and `FLAGSMATCH`. 13 driver checks, 0 failures. Both buttons were found once each in the panel's box and clicked with the real mouse; the map opened and closed by the real `M` key.
+- `revive` with Waypoints 0.2.0: unchanged (restore then clear, 14 checks, 0 failures). Every map open the driver makes now also logs a `MAPSYNC`.
+- In `revive`, one soft `hud slow tick` on a `journal opened` event tick (4.5 ms: core's attach of the panel and buttons plus Waypoints' `MAPSYNC`, one `FindAllOf` pass and the flag writes); the other soft slow ticks (one per run) were core's own `prepare` ticks.
 
 **Results in the VM (V8.1.2, 2026-10-26; logs `dumps/v8.1.2-build26193463/markers/*.vm.batch2.log`): probe, death and revive all pass.**
 - `MapUI_C`'s `Construct` runs on every map open, and every open gets a **new Journal instance** with all its flags rebuilt (4 opens, 4 Journals). So after a revive the Journal is a new instance too (`journal-same-after-revive=no`); the flags it builds take `Selected` from the waypoint actors, which is why "truth is the actor" is enough.
@@ -133,7 +156,11 @@ The kill (V8.1.5+; on V8.1.2 it was `DeathEvent()`, which no longer kills) is on
 - The revive's order of events on a client: one `mk-client` run saw the new HUD after every `RemoveAllWidgets` (no `AGAIN`); the settle window ("again") stays for a late multicast under real latency.
 - `FTransform` marshalling for `BeginDeferredActorSpawnFromClass` works (VM runs); the fallback (`SpawnActor` + the actor's own `BeginPlay` graph) stays, logged as such.
 - The two-player revive passed once per role (2026-10-27, above), between this PC and the VM on one host: little latency. `onRevive = clear` on a client is not run.
-- Other `RemoveAllWidgets` callers (the player controller, the Wendigo head, the endgame bomb) also hide waypoints without a revive; 0.1.0 acts only on revives (same pawn back after a loss is logged at DEBUG and left alone).
+- Other `RemoveAllWidgets` callers (the player controller, the Wendigo head, the endgame bomb) also hide waypoints without a revive; Waypoints acts only on revives (same pawn back after a loss is logged at DEBUG and left alone).
 - `BP_Radio_C:SpawnReinformantRPC` would revive the same character (no new pawn, and it calls `RemoveAllWidgets`): Waypoints would see a HUD loss and the same pawn back and do nothing. Nothing calls it in V8.1.2 or V8.2 (only the unused `SpawnReinformant`).
 
-Files to add to the workspace's `tools/diff-dumps.watch.json` when Waypoints ships: `marker-mechanics.md`, "Hooks and calls the mod relies on", plus `InventoryUI_C.Player`, `AActor:IsActorBeingDestroyed`, `GameplayStatics:BeginDeferredActorSpawnFromClass`/`FinishSpawningActor`.
+- Mark all and Clear all were run on Tower Island only (6 flags); the other maps (Low Island 10, The Forest 7, The Crevasse 9) go by the same code path, `MapUI_C.Levels`, untested in game. A map without a `Lever_Actor_C` has no satellite flag (`satellite=none`), also untested in game.
+- The `MAPSYNC` at each map open runs inside core's Journal event tick (a few ms with the actor read); it's an event tick, so core's slow-tick warning for it is soft.
+- A Mark all whose click spawns a satellite waypoint is counted by the flag's `Selected` turning true (the satellite handler keeps no actor reference); `waypoints=` in `MARKALL` is the earlier actors still alive plus one per successful click, not a second `FindAllOf`.
+
+Files to add to the workspace's `tools/diff-dumps.watch.json` when Waypoints ships: `marker-mechanics.md`, "Hooks and calls the mod relies on", plus `InventoryUI_C.Player`, `AActor:IsActorBeingDestroyed`, `GameplayStatics:BeginDeferredActorSpawnFromClass`/`FinishSpawningActor`. The Journal map symbols the buttons use (`MapUI_C.Satelite`, `SateliteUI_C`'s `Selected`, `Button_28` and click handler) are in it.
