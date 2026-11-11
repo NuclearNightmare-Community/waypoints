@@ -30,7 +30,7 @@ local function boot(opts)
     F.install(W)
     S = { settings = opts.settings, connects = {} }
     if S.settings == nil then S.settings = 'return { onRevive = "restore" }' end
-    for _, m in ipairs({ "revive", "waypoints", "mapbuttons", "game", "nucleus.client" }) do package.loaded[m] = nil end
+    for _, m in ipairs({ "revive", "waypoints", "mapbuttons", "game", "panelfit", "nucleus.client" }) do package.loaded[m] = nil end
     package.preload["nucleus.client"] = nil
     if opts.client ~= false then
         package.preload["nucleus.client"] = function() return { connect = function(o) S.connects[#S.connects + 1] = o end } end
@@ -49,12 +49,12 @@ end
 
 local function newCore(o)
     o = o or {}
-    local core = { name = "Nucleus", version = "0.5.0", log = newLog("Waypoints"), watchers = {}, jwatchers = {}, seq = {}, panels = {}, buttons = {} }
+    local core = { name = "Nucleus", version = "0.6.0", log = newLog("Waypoints"), watchers = {}, jwatchers = {}, seq = {}, panels = {}, buttons = {}, overlapCalls = {} }
     if o.hud ~= false then
         core.ui = { hud = { watch = function(fn) core.watchers[#core.watchers + 1] = fn return #core.watchers end } }
     end
     if o.hud ~= false and o.buttons ~= false then
-        -- core 0.5.0's panels, buttons and Journal events, recording what Waypoints asks for and in which order
+        -- core 0.6.0's panels, buttons and Journal events, recording what Waypoints asks for and in which order
         core.ui.panel = { remove = function(h) core.seq[#core.seq + 1] = "panel.remove " .. tostring(h.id) end, create = function(spec)
             core.seq[#core.seq + 1] = "panel " .. tostring(spec.id)
             local h = setmetatable({ id = spec.id }, { __metatable = "element handle" })
@@ -73,6 +73,15 @@ local function newCore(o)
             core.jwatchers[#core.jwatchers + 1] = fn
             return #core.jwatchers
         end }
+        -- core.ui.debug.overlaps (story 12): o.overlaps(handle) gives its results (default: nothing overlaps);
+        -- o.overlaps = false: no debug table at all. Every call is recorded with its handle.
+        if o.overlaps ~= false then
+            local fake = o.overlaps or function() return {}, { rect = { l = 0, t = 0, r = 10, b = 10 }, screen = { w = 100, h = 100 } } end
+            core.ui.debug = { overlaps = function(h, ...)
+                core.overlapCalls[#core.overlapCalls + 1] = { handle = h, n = select("#", ...) }
+                return fake(h)
+            end }
+        end
     end
     if o.ref ~= false then
         local refs, n = {}, 0
@@ -137,9 +146,9 @@ do
     boot()
     eq(#S.connects, 1, "connect called once")
     local c = S.connects[1]
-    ok(c.mod == "Waypoints" and c.need == ">=0.5.0", "connect{ mod = 'Waypoints', need = '>=0.5.0' }", tostring(c.mod) .. " " .. tostring(c.need))
+    ok(c.mod == "Waypoints" and c.need == ">=0.6.0", "connect{ mod = 'Waypoints', need = '>=0.6.0' }", tostring(c.mod) .. " " .. tostring(c.need))
     eq(#W.printed, 0, "nothing printed during main.lua")
-    c.onFail("Nucleus 0.3.0 is older than Waypoints needs (>=0.5.0). Update Nucleus.")
+    c.onFail("Nucleus 0.5.0 is older than Waypoints needs (>=0.6.0). Update Nucleus.")
     eq(#W.printed, 0, "onFail adds no line (connect logged the cause)")
 end
 do -- core without HUD events: one ERROR, nothing registered.
@@ -332,7 +341,10 @@ do -- The panel and buttons, created before the Journal watcher; READY says butt
     ready(core)
     eq(table.concat(core.seq, ","), "panel waypoints,button markAll,button clearAll,journal.watch", "panel, then the two buttons, then journal.watch")
     local p = core.panels[1].spec
-    ok(p.place.host == "journal" and p.place.corner == "bottom-right" and p.layout == "horizontal", "panel: journal, bottom-right, horizontal")
+    ok(p.place.host == "journal" and p.place.near == "map" and p.place.side == "below" and p.place.align == "center" and p.place.gap == "tight"
+        and p.layout == "horizontal", "panel: journal, near the map, below, centred, tight gap, horizontal (story 5)")
+    local keys = 0 for _ in pairs(p.place) do keys = keys + 1 end
+    eq(keys, 5, "panel: the place has exactly host, near, side, align and gap")
     local m, c = core.buttons.markAll.spec, core.buttons.clearAll.spec
     eq(m.label, "Mark all", "button markAll labelled 'Mark all'")
     eq(c.label, "Clear all", "button clearAll labelled 'Clear all'")
@@ -407,6 +419,129 @@ do -- deref raising during a press: treated as not open, nothing done.
     core.deref = saved
     eq(count("WARN Mark all skipped: the map is not open$"), 1, "deref raising: treated as not open")
     eq(count("MARKALL"), 0, "deref raising: nothing marked")
+end
+
+-- ---------------------------------------------------------------- the debug-only fit check (story 5, PANELFIT)
+local PANEL_RECT = { l = 296, t = 840, r = 416, b = 876 }
+local function fitInfo() return { rect = PANEL_RECT, screen = { w = 1280, h = 720 }, checked = 300, drawn = 80 } end
+local function debugCore(o) -- booted with debug on and a match
+    boot{ settings = 'return { onRevive = "restore", debug = true }' }
+    local core = newCore(o)
+    ready(core)
+    match(core)
+    return core
+end
+do -- Debug on: the open schedules one check 2500 ms later; it calls overlaps(panel) once and logs PANELFIT + PANELHIT.
+    local core = debugCore{ overlaps = function()
+        return {
+            { path = "/J.Paper", class = "Image", rect = { l = 87, t = 72, r = 625, b = 598 + 400 } },
+            { path = "/J.MapUI.Frame", class = "Image", rect = { l = 100, t = 100, r = 400, b = 850 } },
+            { path = "/J.Perk", class = "Image", rect = { l = 400, t = 860, r = 450, b = 900 } },
+        }, fitInfo()
+    end }
+    eq(#W.delayed, 0, "debug on: nothing scheduled before the map opens")
+    journalEvent(core, mapFlags(), "opened")
+    eq(#W.delayed, 1, "debug on, opened: one check scheduled")
+    eq(W.delayed[1] and W.delayed[1].ms, 2500, "debug on: the check runs 2500 ms after the open")
+    eq(#core.overlapCalls, 0, "debug on: overlaps not called inside the open event")
+    W.runDelayed()
+    eq(#core.overlapCalls, 1, "debug on: overlaps called once")
+    ok(core.overlapCalls[1].handle == core.panels[1].handle and core.overlapCalls[1].n == 0, "debug on: overlaps(panel handle), one argument")
+    eq(count("^%[Waypoints%] PANELFIT rect=%(296,840%)%-%(416,876%) screen=1280x720 hits=3 partial=2$"), 1, "PANELFIT line: rect, screen, hits, partial")
+    eq(count("^%[Waypoints%] PANELHIT "), 3, "one PANELHIT per hit")
+    eq(count("^%[Waypoints%] PANELHIT under Image /J%.Paper %(87,72%)%-%(625,998%)$"), 1, "PANELHIT under: the page paper containing the panel")
+    eq(count("^%[Waypoints%] PANELHIT partial Image /J%.Perk %(400,860%)%-%(450,900%)$"), 1, "PANELHIT partial: a widget cutting into the panel")
+    eq(#W.delayed, 0, "debug on: nothing more scheduled after a result")
+    eq(count("WARN") + count("ERROR"), 0, "debug on: no WARN or ERROR")
+end
+do -- More than 10 hits: at most 10 PANELHIT lines, the partial ones first.
+    local core = debugCore{ overlaps = function()
+        local list = {}
+        for i = 1, 12 do list[i] = { path = "/J.Under" .. i, class = "Image", rect = { l = 0, t = 0, r = 2000, b = 2000 } } end
+        list[13] = { path = "/J.Cut", class = "Border", rect = { l = 300, t = 800, r = 350, b = 850 } }
+        return list, fitInfo()
+    end }
+    journalEvent(core, mapFlags(), "opened")
+    W.runDelayed()
+    eq(count("PANELFIT rect=.* hits=13 partial=1$"), 1, "13 hits, 1 partial")
+    eq(count("PANELHIT "), 10, "at most 10 PANELHIT lines")
+    ok((lines("PANELHIT ")[1] or ""):find("PANELHIT partial Border /J.Cut", 1, true) ~= nil, "the partial hit is listed first")
+end
+do -- Not painted yet: retried every 1000 ms up to 3 times, then PANELFIT none (<reason>).
+    local core = debugCore{ overlaps = function() return nil, "not painted yet (no on-screen geometry)" end }
+    journalEvent(core, mapFlags(), "opened")
+    local delays = {}
+    for _ = 1, 6 do
+        if #W.delayed == 0 then break end
+        delays[#delays + 1] = W.delayed[1].ms
+        W.runDelayed()
+    end
+    eq(table.concat(delays, ","), "2500,1000,1000,1000", "not painted: the first try, then 3 retries 1000 ms apart")
+    eq(#core.overlapCalls, 4, "not painted: overlaps called 4 times")
+    eq(count("^%[Waypoints%] PANELFIT none %(not painted yet %(no on%-screen geometry%)%)$"), 1, "not painted: one PANELFIT none naming the reason")
+    eq(count("PANELFIT rect="), 0, "not painted: no PANELFIT rect line")
+end
+do -- Painted on the second try: one retry, then the PANELFIT line.
+    local n = 0
+    local core = debugCore{ overlaps = function() n = n + 1 if n == 1 then return nil, "not painted yet" end return {}, fitInfo() end }
+    journalEvent(core, mapFlags(), "opened")
+    W.runDelayed(); W.runDelayed()
+    eq(count("PANELFIT rect=.* hits=0 partial=0$"), 1, "painted on the retry: PANELFIT hits=0 partial=0")
+    eq(count("PANELFIT none"), 0, "painted on the retry: no PANELFIT none")
+end
+do -- Stale: closed before the check, or a newer open: nothing logged for the old open.
+    local core = debugCore{ overlaps = function() return {}, fitInfo() end }
+    journalEvent(core, mapFlags(), "opened")
+    journalEvent(core, nil, "closed")
+    W.runDelayed()
+    eq(#core.overlapCalls, 0, "closed before the check: overlaps not called")
+    eq(count("PANELFIT"), 0, "closed before the check: nothing logged")
+    journalEvent(core, mapFlags(), "opened")
+    journalEvent(core, nil, "lost")
+    W.runDelayed()
+    eq(count("PANELFIT"), 0, "lost before the check: nothing logged")
+    journalEvent(core, mapFlags(), "opened")
+    journalEvent(core, mapFlags(), "opened")
+    eq(#W.delayed, 2, "two opens: two checks queued")
+    W.runDelayed()
+    eq(#core.overlapCalls, 1, "two opens: only the newer check calls overlaps")
+    eq(count("PANELFIT rect="), 1, "two opens: one PANELFIT line")
+end
+do -- Stale during the retries: a close between two tries stops them.
+    local core = debugCore{ overlaps = function() return nil, "not painted yet" end }
+    journalEvent(core, mapFlags(), "opened")
+    W.runDelayed()
+    journalEvent(core, nil, "closed")
+    W.runDelayed()
+    eq(#core.overlapCalls, 1, "closed between retries: no further overlaps call")
+    eq(count("PANELFIT"), 0, "closed between retries: nothing logged")
+end
+do -- overlaps throws: one WARN for the session, nothing else breaks.
+    local core = debugCore{ overlaps = function() error("nucleus.ui.debug.overlaps: boom") end }
+    journalEvent(core, mapFlags(), "opened"); W.runDelayed()
+    journalEvent(core, mapFlags(), "opened"); W.runDelayed()
+    eq(count("^%[Waypoints%] WARN PANELFIT check failed: .*boom"), 1, "overlaps throwing: one WARN")
+    eq(count("ERROR"), 0, "overlaps throwing: no ERROR")
+    press(core, "markAll")
+    eq(count("^%[Waypoints%] MARKALL "), 1, "overlaps throwing: Mark all still works")
+end
+do -- Debug off: no scheduling, no overlaps call.
+    boot()
+    local core = newCore{ overlaps = function() return {}, fitInfo() end }
+    ready(core)
+    match(core)
+    journalEvent(core, mapFlags(), "opened")
+    eq(#W.delayed, 0, "debug off: nothing scheduled on open")
+    journalEvent(core, nil, "closed"); journalEvent(core, mapFlags(), "opened")
+    eq(#W.delayed, 0, "debug off: still nothing on a reopen")
+    eq(#core.overlapCalls, 0, "debug off: overlaps never called")
+    eq(count("PANELFIT"), 0, "debug off: no PANELFIT line")
+end
+do -- Debug on but core without ui.debug: nothing scheduled, no error.
+    local core = debugCore{ overlaps = false }
+    journalEvent(core, mapFlags(), "opened")
+    eq(#W.delayed, 0, "no ui.debug: nothing scheduled")
+    eq(count("PANELFIT") + count("WARN") + count("ERROR"), 0, "no ui.debug: no line")
 end
 
 loadfile = realLoadfile

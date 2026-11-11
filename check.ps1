@@ -9,7 +9,8 @@
   AGAIN followed by its RESTORED or CLEARED line before the next one; for buttons, MARKALL's marked and flags equal the
   driver's EXPECT line (the map's distinct flag names minus the 2 marked by hand, plus 1 for a satellite flag) and a
   MAPSYNC after CLEARALL (the reopen), and MARKALL's flags equal the driver's MAP line (its table's count for the map
-  the run travelled to); and for probe, the story 2 answers.
+  the run travelled to); buttons also needs the panel placed under the map on both key opens (PANELPLACE) and a
+  PANELFIT with partial=0 (none above 0); and for probe, the story 2 answers.
   Exit code 1 when any check fails; otherwise prints "All checks passed."
   Scenarios (run.ps1 drives them): probe, revive, death, buttons, no-core, old-core. Pair scenarios (tools/vm/pair.ps1 with
   test/pair/waypoints-scenarios.ps1): pair-victim and pair-hostvictim judge the modded player's log, pair-host the host's
@@ -128,6 +129,11 @@ $expect = @{
         # Every map open synced (the Lua open while marking, the key opens), and the flags match the actors on the reopen.
         "\[$C\] MAPSYNC flags=\d+ selected=\d+ satellite=(yes|no|none)\s*$"
         "\[$D\] OK FLAGSMATCH reopen "
+        # Story 5: the panel under the map square. Both key opens: placed where the intent says, in the host canvas's
+        # units (driver PANELPLACE); and Waypoints' debug-only fit check: no drawn widget cuts into the panel.
+        "#2|\[$D\] OK PANELPLACE "
+        "\[$C\] PANELFIT rect=.* partial=0\s*$"
+        "!\[$C\] PANELFIT .*partial=[1-9]"
     )
     'death' = $driven + @(
         "\[$C\] PAWN first "
