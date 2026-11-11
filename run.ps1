@@ -7,7 +7,7 @@
   line, the game exits (crash), or -TimeoutSec runs out (hang); then closes the game, force-killing it (and any crash
   reporter) after 15 s. Only ever stops the Shipping exe under this instance, never the real install or another copy.
   The driver writes "<seq> key ENTER" to its Scripts/request.txt for touchdown (and "<seq> key <A-Z>" for the map key
-  in the buttons scenario); this script posts the key to the game window's message queue (PostMessage
+  in the buttons and buttons-revive scenarios); this script posts the key to the game window's message queue (PostMessage
   WM_KEYDOWN/WM_KEYUP: no foreground change, no global input), then writes <seq> to done.txt. "<seq> click <x> <y>"
   (the buttons scenario: Mark all / Clear all on the Journal map) is a real mouse click at that desktop point, as
   Nucleus's run.ps1 does it: the game window is brought to the front and clicked only while it is in front (it takes
@@ -35,21 +35,22 @@
   plays on the host. The log is kept as <scenario>.vm.log, or <scenario>-<map>.vm.log with -Map, and judged with check.ps1 -Target vm.
   Every Waypoints scenario runs in the VM too (none judges timing).
 .EXAMPLE
+  ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2-build26512322 -Scenario buttons-revive # the routine check
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario revive
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario probe -Target vm
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2-build26512322 -Scenario buttons -Map Crevasse
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
-    [ValidateSet('probe', 'revive', 'death', 'buttons', 'no-core', 'old-core')]
+    [ValidateSet('probe', 'revive', 'death', 'buttons', 'buttons-revive', 'no-core', 'old-core')]
     [string] $Scenario = 'revive',
     [ValidateSet('', 'LowIsland', 'TowerIsland', 'Forest', 'Crevasse', IgnoreCase = $false)] [string] $Map = '', # '': the driver's default (TowerIsland)
-    [int] $TimeoutSec = 0, # 0: per scenario (probe 600, revive 720, buttons 600, others 480); x1.5 in the VM
+    [int] $TimeoutSec = 0, # 0: per scenario (probe 600, revive 720, buttons 600, buttons-revive 900, others 480); x1.5 in the VM
     [ValidateSet('host', 'vm')] [string] $Target = 'host',
     [switch] $AllowOtherDrivers # run even when another runner's test mod is enabled in the copy (tools/run-guard)
 )
 $ErrorActionPreference = 'Stop'
-$hostTimeout = switch ($Scenario) { 'probe' { 600 } 'revive' { 720 } 'buttons' { 600 } default { 480 } }
+$hostTimeout = switch ($Scenario) { 'probe' { 600 } 'revive' { 720 } 'buttons' { 600 } 'buttons-revive' { 900 } default { 480 } }
 if ($TimeoutSec -le 0 -and $Target -eq 'host') { $TimeoutSec = $hostTimeout }
 $CoreName = 'Nucleus'
 $here     = $PSScriptRoot

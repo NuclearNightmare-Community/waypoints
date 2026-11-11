@@ -343,6 +343,9 @@ do -- The panel and buttons, created before the Journal watcher; READY says butt
     local p = core.panels[1].spec
     ok(p.place.host == "journal" and p.place.near == "map" and p.place.side == "below" and p.place.align == "center" and p.place.gap == "tight"
         and p.layout == "horizontal", "panel: journal, near the map, below, centred, tight gap, horizontal (story 5)")
+    eq(p.gap, "normal", "panel: normal gap (16 units) between Mark all and Clear all")
+    local ckeys = 0 for _ in pairs(p) do ckeys = ckeys + 1 end
+    eq(ckeys, 4, "panel.create gets exactly id, place, layout and gap")
     local keys = 0 for _ in pairs(p.place) do keys = keys + 1 end
     eq(keys, 5, "panel: the place has exactly host, near, side, align and gap")
     local m, c = core.buttons.markAll.spec, core.buttons.clearAll.spec

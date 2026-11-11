@@ -16,6 +16,8 @@ local SNAPSHOT_MS = 50 -- the snapshot at the death runs this much later, outsid
 -- The Mark all / Clear all panel: on the left page, centred directly under the map square (core 0.6.0's measured `map`
 -- region: the panel stays collapsed until the new Journal's first paint, so it shows about 1-1.5 s after each open).
 local PANEL_PLACE = { host = "journal", near = "map", side = "below", align = "center", gap = "tight" }
+-- The space between Mark all and Clear all inside the panel (core pads the second button's Left): "normal" is 16 units.
+local PANEL_GAP = "normal"
 -- Debug-only fit check (PANELFIT): first try this long after `opened` (the map region is valid within 4 journal
 -- ticks), then on "not painted yet" and the like every RETRY_MS, at most FIT_RETRIES more times.
 local FIT_MS, FIT_RETRY_MS, FIT_RETRIES = 2500, 1000, 3
@@ -117,7 +119,7 @@ local function setupButtons(core, log)
         return log.debugEnabled == true and type(ui.debug) == "table" and type(ui.debug.overlaps) == "function"
     end
     local okS, err = pcall(function()
-        p = panel.create{ id = "waypoints", place = PANEL_PLACE, layout = "horizontal" }
+        p = panel.create{ id = "waypoints", place = PANEL_PLACE, layout = "horizontal", gap = PANEL_GAP }
         button.create{ id = "markAll", label = "Mark all", place = { panel = p }, onClick = function() press(mapbuttons.markAll, "Mark all") end }
         button.create{ id = "clearAll", label = "Clear all", place = { panel = p }, onClick = function() press(mapbuttons.clearAll, "Clear all") end }
         journal.watch(function(j, info)

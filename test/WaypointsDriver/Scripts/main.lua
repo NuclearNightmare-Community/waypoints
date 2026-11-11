@@ -32,6 +32,8 @@
 --            Selected; the map closed and reopened by the key: every flag's Selected matches its actor (FLAGSMATCH).
 --            Story 5: after both key opens, the panel is placed under the map square (PANELPLACE, canvas units).
 --            Waypoints' own MARKALL / CLEARALL / MAPSYNC lines are judged by check.ps1 against the EXPECT line.
+--   buttons-revive: the routine check, one launch: buttons, then (nothing up after Clear all) revive's steps with the
+--            marking phase "remark", in the same match; every check of both.
 --   no-core, old-core: in a match: nothing from Waypoints (check.ps1 judges its one line).
 --   The solo scenarios travel to the map named in Scripts/map.txt (deploy.ps1 -Test -Map): a key of the fixed MAPS
 --   table, never a path; an unknown key ends the run (FAIL MAP) before any travel; no map.txt is Tower Island. They log
@@ -1236,9 +1238,9 @@ local function buildProbe()
     end)
 end
 
-local function buildRevive()
-    enterMatch("match1")
-    mark("mark", 2)
+-- The revive part (after enterMatch): `markPhase` names the marking phase (MARKED <markPhase> 3 waypoints).
+local function reviveSteps(markPhase)
+    mark(markPhase, 2)
     step("paint before", paintEach("before", "paintBefore"))
     drawnAll("before", "paintBefore")
     step("journal before", function() openMap("before") return after(1), 5, "open" end)
@@ -1248,6 +1250,10 @@ local function buildRevive()
     setOnRevive("clear")
     realRevive("revive2")
     clearedChecks("revive2")
+end
+local function buildRevive()
+    enterMatch("match1")
+    reviveSteps("mark")
 end
 
 local function buildDeath()
@@ -1272,8 +1278,8 @@ end
 
 -- Story 3: 2 flags marked by their own click, then the map opened by the real key, Mark all and Clear all clicked with
 -- the real mouse, each checked against the world; then the map closed and reopened by the key and checked again.
-local function buildButtons()
-    enterMatch("match1")
+-- The buttons part (after enterMatch); ends with the map closed by the key.
+local function buttonsSteps()
     lobbyOver("match1")
     mark("mark", 2, true)
     readMapKey()
@@ -1311,6 +1317,19 @@ local function buildButtons()
     -- sees the open (which lags the key by up to 500 ms) plus up to 3 retries 1 s apart, 6 s; 7 s leaves a margin.
     wait("reopen: fit check", 7)
     keyMap("end", false)
+end
+local function buildButtons()
+    enterMatch("match1")
+    buttonsSteps()
+end
+
+-- The routine check: buttons, then revive, in one match (one launch). After Clear all nothing is up, so the revive part
+-- marks again (phase "remark": 2 location flags and the satellite), dies, is revived twice (restore, then clear).
+-- Unlike `revive`, its deaths come after the lobby countdown (the buttons part cuts it so the map key works).
+local function buildButtonsRevive()
+    enterMatch("match1")
+    buttonsSteps()
+    reviveSteps("remark")
 end
 
 local function buildNoWaypoints()
@@ -1518,7 +1537,7 @@ local function tick()
     busy = false
 end
 
-local build = ({ probe = buildProbe, revive = buildRevive, death = buildDeath, buttons = buildButtons, ["no-core"] = buildNoWaypoints, ["old-core"] = buildNoWaypoints,
+local build = ({ probe = buildProbe, revive = buildRevive, death = buildDeath, buttons = buildButtons, ["buttons-revive"] = buildButtonsRevive, ["no-core"] = buildNoWaypoints, ["old-core"] = buildNoWaypoints,
                  ["pair-victim"] = buildPairVictim, ["pair-host"] = buildPairHost, ["pair-hostvictim"] = buildPairHostVictim })[SCENARIO]
 if not build then
     say("END result=FAIL checks=0 failures=1 reason=unknown-scenario %s", SCENARIO)
