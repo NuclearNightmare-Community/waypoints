@@ -8,7 +8,7 @@ A Nuclear Nightmare mod (UE4SS Lua, on the Nucleus core) for your Journal map wa
 
 ### Mark all and Clear all
 
-Open the Journal map: two buttons sit on the left page, centred directly under the map square. They appear about 1-1.5 s after the map opens: Nucleus places them from the map's measured position, which exists only once the Journal has been drawn.
+Open the Journal map: two buttons sit on the left page, centred directly under the map square. They appear up to about 1.5 s after the map opens: Nucleus places them from the map's measured position, which exists only once the Journal has been drawn.
 
 - **Mark all** puts a waypoint up for every location flag of the current map and the satellite flag (when the map has one). Flags that already had a waypoint keep it and get no second one.
 - **Clear all** takes every waypoint down: no flag stays selected, nothing is left on screen.
