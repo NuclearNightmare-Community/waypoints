@@ -102,7 +102,9 @@ local function setupButtons(core, log)
                 if tries < FIT_RETRIES then fit(my, tries + 1, FIT_RETRY_MS) else log.info("%s", panelfit.none(info)) end
                 return
             end
-            local hits, partial = panelfit.classify(list, type(info) == "table" and info.rect or nil)
+            local rect = type(info) == "table" and info.rect or nil
+            if not panelfit.isRect(rect) then log.info("%s", panelfit.none("no panel rect")) return end
+            local hits, partial = panelfit.classify(list, rect)
             for _, l in ipairs(panelfit.lines(info, hits, partial)) do log.info("%s", l) end
         end
         local okL = type(ExecuteInGameThreadWithDelay) == "function" and pcall(ExecuteInGameThreadWithDelay, ms, function()

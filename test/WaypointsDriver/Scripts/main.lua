@@ -1307,8 +1307,9 @@ local function buildButtons()
         check(#states > 0 and #mism == 0, "FLAGSMATCH reopen every flag's Selected matches its waypoint actor (selected: %s; actors: %s)%s",
             table.concat(sel, ","), table.concat(up, ","), #mism > 0 and (" differ: " .. table.concat(mism, ",")) or "")
     end)
-    -- Keep the reopened map up until Waypoints' debug fit check (2.5 s after core sees the open) has run for it too.
-    wait("reopen: fit check", 2.5)
+    -- Keep the reopened map up until Waypoints' debug fit check (2.5 s after core sees the open, which lags the key by
+    -- up to 500 ms) has run for it too.
+    wait("reopen: fit check", 4.5)
     keyMap("end", false)
 end
 
