@@ -2,7 +2,7 @@
 -- trigger"). Pure Lua: it sees plain facts (strings and numbers) that main.lua reads inside core's HUD callback, never a
 -- UObject, so it holds nothing across callbacks and runs outside the game in the unit tests.
 --
--- The rule (SPEC "Revive trigger", marker-mechanics.md "Death and revive"):
+-- The rule (SPEC "Revive trigger", flag-mechanics.md "Death and revive"):
 --   * The local pawn is the pawn of the live local HUD (InventoryUI_C.Player, else its owning player's pawn), read on
 --     every `attached` event. Never ReceivePossess: it runs only where the controller has authority.
 --   * A revive is the local pawn becoming a NEW BP_FirstPersonCharacter_C in the SAME world, after the HUD was lost
