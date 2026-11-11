@@ -30,6 +30,7 @@
 --            the map opened by the real key IA_Map is bound to, Waypoints' Mark all clicked with the real mouse: one
 --            live waypoint actor per flag (and the satellite), every flag Selected; Clear all: none left, none
 --            Selected; the map closed and reopened by the key: every flag's Selected matches its actor (FLAGSMATCH).
+--            Story 5: after both key opens, the panel is placed under the map square (PANELPLACE, canvas units).
 --            Waypoints' own MARKALL / CLEARALL / MAPSYNC lines are judged by check.ps1 against the EXPECT line.
 --   no-core, old-core: in a match: nothing from Waypoints (check.ps1 judges its one line).
 --   The solo scenarios travel to the map named in Scripts/map.txt (deploy.ps1 -Test -Map): a key of the fixed MAPS
@@ -869,6 +870,82 @@ local function screenRect(w)
     return ok and r or nil
 end
 
+-- Story 5: where Waypoints' panel sits, in the map page canvas's units (resolution-independent) through core's
+-- <Core>_RectIn, as core's SkelTest measures the Journal regions: canvas = MapWidget.WidgetTree.RootWidget, the `map`
+-- region = MapWidget.MapUI, `page-left` = MapWidget.NN_LeftFieldPaper. PANEL_FIT names the placement Waypoints'
+-- main.lua uses (PANEL_PLACE): "below-map" = { near = "map", side = "below", align = "center", gap = "tight" }, or the
+-- fallback "page-left-corner" = { corner = "bottom-left", region = "page-left", inset = "tight" }. Change both together.
+local PANEL_FIT = "below-map"
+local TIGHT, FIT_TOL, PANEL_WAIT = 8, 1, 8 -- canvas units; units of slack; seconds to wait for the placed panel
+local function rectIn(canvas, w)
+    local cdo = found(ACTOR_CDO)
+    if not (cdo and valid(canvas) and valid(w)) then return nil end
+    local ok, r = pcall(function()
+        local fn = cdo[CORE .. "_RectIn"]
+        local a, b = fn(cdo, canvas, w, { X = 0, Y = 0 }), fn(cdo, canvas, w, { X = 1, Y = 1 })
+        return { l = a.X, t = a.Y, r = b.X, b = b.Y }
+    end)
+    return ok and r or nil
+end
+local function rtext(r) return r and string.format("(%.0f,%.0f)-(%.0f,%.0f)", r.l, r.t, r.r, r.b) or "?" end
+local function hasArea(r) return r ~= nil and r.r - r.l > 1 and r.b - r.t > 1 end
+-- { panel, map, page } in canvas units for the open map (any of them nil when not found), or nil and why.
+local function panelRects()
+    local j = openJournal()
+    if not j then return nil, "the map is not open" end
+    local okM, mw = pcall(function() return j.MapWidget end)
+    if not (okM and valid(mw)) then return nil, "no MapWidget" end
+    local okC, canvas = pcall(function() return mw.WidgetTree.RootWidget end)
+    if not (okC and valid(canvas)) then return nil, "no map canvas" end
+    local panel = childTagged(canvas, tagFor("waypoints"))
+    if not panel then return nil, "no Waypoints panel on the map page" end
+    local okU, mapW = pcall(function() return mw.MapUI end)
+    local okP, pageW = pcall(function() return mw.NN_LeftFieldPaper end)
+    return { panel = rectIn(canvas, panel), map = okU and rectIn(canvas, mapW) or nil, page = okP and rectIn(canvas, pageW) or nil }
+end
+-- (a) of story 5's fit rule: true when the panel is where PANEL_FIT says, plus a description either way.
+local function panelPlacedAt(R)
+    if not R then return false, "no rectangles" end
+    local p, m, pg = R.panel, R.map, R.page
+    local desc = string.format("the panel %s, the map %s, page-left %s", rtext(p), rtext(m), rtext(pg))
+    if not (hasArea(p) and hasArea(pg)) then return false, desc .. " (panel not drawn yet)" end
+    local inside = p.l >= pg.l - FIT_TOL and p.t >= pg.t - FIT_TOL and p.r <= pg.r + FIT_TOL and p.b <= pg.b + FIT_TOL
+    if PANEL_FIT == "page-left-corner" then
+        local dl, db = p.l - (pg.l + TIGHT), p.b - (pg.b - TIGHT)
+        local good = math.abs(dl) <= FIT_TOL and math.abs(db) <= FIT_TOL and inside
+        return good, string.format("%s: left - (page left + %d) = %.1f, bottom - (page bottom - %d) = %.1f, inside page-left=%s",
+            desc, TIGHT, dl, TIGHT, db, tostring(inside))
+    end
+    if not hasArea(m) then return false, desc .. " (map region not drawn yet)" end
+    local dy = p.t - (m.b + TIGHT)
+    local dx = (p.l + p.r) / 2 - (m.l + m.r) / 2
+    local good = math.abs(dy) <= FIT_TOL and math.abs(dx) <= FIT_TOL and inside
+    return good, string.format("%s: top - (map bottom + %d) = %.1f, centre dx = %.1f, inside page-left=%s", desc, TIGHT, dy, dx, tostring(inside))
+end
+-- Waits (polling every runner tick) until the panel is placed per PANEL_FIT, at most PANEL_WAIT s: core keeps a panel
+-- near the measured `map` region collapsed until the new Journal's first paint (about 1.1-1.5 s after the open).
+-- Logs OK PANELPLACE <phase> ... after <s> s, or FAIL PANELPLACE with the last rectangles.
+local function panelPlaced(phase)
+    step(phase .. ": panel placed", function()
+        local t0, last = os.clock(), "not measured"
+        return function()
+            local R, why = panelRects()
+            local good, desc = panelPlacedAt(R)
+            last = R and desc or why
+            local t = os.clock() - t0
+            if good then
+                check(true, "PANELPLACE %s %s after %.1f s (%s)", phase, desc, t, PANEL_FIT)
+                return true
+            end
+            if t >= PANEL_WAIT then
+                check(false, "PANELPLACE %s the panel was not placed (%s) within %d s: %s", phase, PANEL_FIT, PANEL_WAIT, last)
+                return true
+            end
+            return false
+        end, PANEL_WAIT + 4, phase .. " panel placed"
+    end)
+end
+
 -- The game state's lobby countdown, cut to 2 s on this (listen server) host: the character opens the map only when
 -- LobbyMinutes and LobbySeconds are both 0 (core's SkelTest lobbyOver).
 local function lobbyOver(phase)
@@ -907,8 +984,9 @@ local function readMapKey()
         check(key ~= nil, "MAPKEY IA_Map is bound to the letter %s in IMC_Default", S.mapKey)
     end)
 end
--- The map opened (or closed) by the real key; S.journalPath is the open Journal's path (for flags()).
-local function keyMap(phase, open)
+-- The map opened (or closed) by the real key; S.journalPath is the open Journal's path (for flags()). With `panel`
+-- (an open), waits for Waypoints' panel to be placed under the map (PANELPLACE) instead of the fixed settle.
+local function keyMap(phase, open, panel)
     step(phase .. (open and ": open by key" or ": close by key"), function()
         say("MAPKEY %s pressing %s to %s the map", phase, S.mapKey, open and "open" or "close")
         return request("key " .. S.mapKey), 30, phase .. " map key served"
@@ -920,8 +998,10 @@ local function keyMap(phase, open)
             return not open and j == nil
         end, 10, phase .. (open and " the Journal in the viewport" or " the Journal out of the viewport")
     end)
-    -- Core's poller sees the open within 500 ms and attaches the buttons; Waypoints' MAPSYNC runs right after.
-    step(phase .. ": settle", function() return after(1.5), 4, "map settle" end)
+    -- Core's poller sees the open within 500 ms and attaches the buttons; Waypoints' MAPSYNC runs right after. The
+    -- panel itself shows only after the Journal's first paint (story 5): wait for it to be placed.
+    if open and panel then panelPlaced(phase)
+    else step(phase .. ": settle", function() return after(1.5), 4, "map settle" end) end
 end
 -- A real mouse click on Waypoints' button `id`, then a pause for the hook and the action.
 local function clickButton(phase, id)
@@ -958,6 +1038,15 @@ end
 -- driver), so the driver calls the button widget's <Core>_OnClicked(), the Blueprint function the button's OnClicked
 -- calls; core's dispatch hook runs on it as on a real click (core's SkelTest BDOUBLE does the same). Not an OS click.
 local function pressButton(phase, id)
+    -- The panel near the measured map region shows only after the Journal's first paint (story 5): wait until the
+    -- button has a screen rectangle (at most PANEL_WAIT s) before pressing.
+    step(phase .. ": shown " .. id, function()
+        return function()
+            local w = buttonWidget(id)
+            local r = w and screenRect(w)
+            return r ~= nil and r.r - r.l > 1 and r.b - r.t > 1
+        end, PANEL_WAIT, phase .. " '" .. id .. "' shown"
+    end)
     step(phase .. ": press " .. id, function()
         local w, why, np, nb = buttonWidget(id)
         if not check(w ~= nil, "BPOINT %s '%s' is on the map page%s", phase, id, why and (" (" .. why .. ")") or "") then return end
@@ -1188,7 +1277,7 @@ local function buildButtons()
     lobbyOver("match1")
     mark("mark", 2, true)
     readMapKey()
-    keyMap("buttons", true)
+    keyMap("buttons", true, true)
     step("buttons: expect", function()
         local names, sat = distinctNames()
         S.flagNames, S.hasSat = names, sat
@@ -1202,7 +1291,7 @@ local function buildButtons()
     clickButton("clearall", "clearAll")
     clearedCheck("clearall")
     keyMap("close", false)
-    keyMap("reopen", true)
+    keyMap("reopen", true, true)
     step("reopen: flags", function()
         local wp = waypoints()
         local up = {}
@@ -1218,6 +1307,8 @@ local function buildButtons()
         check(#states > 0 and #mism == 0, "FLAGSMATCH reopen every flag's Selected matches its waypoint actor (selected: %s; actors: %s)%s",
             table.concat(sel, ","), table.concat(up, ","), #mism > 0 and (" differ: " .. table.concat(mism, ",")) or "")
     end)
+    -- Keep the reopened map up until Waypoints' debug fit check (2.5 s after core sees the open) has run for it too.
+    wait("reopen: fit check", 2.5)
     keyMap("end", false)
 end
 

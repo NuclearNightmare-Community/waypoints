@@ -36,9 +36,9 @@ $P1 = '/Game/Maps/SmallLoweIsland/SmallMap.SmallMap:PersistentLevel.BP_FirstPers
 $P2 = '/Game/Maps/SmallLoweIsland/SmallMap.SmallMap:PersistentLevel.BP_FirstPersonCharacter_C_2147481500'
 $P3 = '/Game/Maps/SmallLoweIsland/SmallMap.SmallMap:PersistentLevel.BP_FirstPersonCharacter_C_2147481000'
 function Start-Log([string] $scenario, [string] $onRevive = 'restore') { @(
-    (U "Starting Lua mod 'Nucleus'"), (L 'Nucleus' 'READY version=0.5.0 native=0.5.0 ue4ss=v3.0.1-1181-g83330635 boot=1 floor=0.1.0 features=call,clock'),
+    (U "Starting Lua mod 'Nucleus'"), (L 'Nucleus' 'READY version=0.6.0 native=0.6.0 ue4ss=v3.0.1-1181-g83330635 boot=1 floor=0.1.0 features=call,clock'),
     (U "Starting Lua mod 'WaypointsDriver'"), (Dr "SCENARIO $scenario"), (Dr 'LOADED 40 steps'), (U "Starting Lua mod 'Waypoints'"),
-    (M 'CONNECT ok Nucleus 0.5.0 (pong 0.5.0 boot=1)'), (M "READY onRevive=$onRevive buttons=yes"),
+    (M 'CONNECT ok Nucleus 0.6.0 (pong 0.6.0 boot=1)'), (M "READY onRevive=$onRevive buttons=yes"),
     (M 'DEBUG hud tick n=120 poll avg 20 max 90'), (M "PAWN first $P1")) }
 function Restored([string] $n = '3') { @(
     (M "RESTORE location 'Weather Station' respawned bReplicates=false via BeginDeferredActorSpawnFromClass"),
@@ -145,6 +145,9 @@ $buttons = (Start-Log 'buttons') + @(
     (Dr 'OK MARKED mark 2 waypoints, one waypoint actor each (Crash Site,Weather Station)'),
     (Dr 'MAPKEY M (IA_Map keys in IMC_Default: M)'), (Dr 'OK MAPKEY IA_Map is bound to the letter M in IMC_Default'),
     (Dr 'MAPKEY buttons pressing M to open the map'), (M 'MAPSYNC flags=6 selected=2 satellite=no'),
+    (Dr 'OK PANELPLACE buttons the panel (443,829)-(623,883) is 8 below the map (165,210)-(901,821), centred (dx 0.0) and inside page-left (130,108)-(937,897) after 1.3 s'),
+    (M 'PANELFIT rect=(296,840)-(416,876) screen=1280x720 hits=1 partial=0'),
+    (M 'PANELHIT under Image /Game/Graphics/Journal/Journal.Journal_C_1.WidgetTree.MapWidget.WidgetTree.NN_LeftFieldPaper (87,72)-(625,598)'),
     (Dr 'EXPECT buttons marked=5 flags=6 satellite=yes (Weather Station,Crash Site,Installation Entrance #1,Installation Entrance #2,Construction Site,Military Outpost)'),
     (Dr 'OK FLAGS buttons the map has 6 location flags'), (Dr 'OK FLAGCOUNT buttons 6 distinct location flags on TowerIsland (the table says 6)'),
     (Dr 'OK BPOINT markall ''markAll'' is on the map page with a screen rectangle (3000,1300)-(3100,1330)'), (Dr 'OK BONE markall one Waypoints panel and one ''markAll'' button on the map page (1, 1)'),
@@ -159,6 +162,7 @@ $buttons = (Start-Log 'buttons') + @(
     (Dr 'OK ALLCLEARED clearall no live waypoint actor left (0: )'), (Dr 'OK NONESELECTED clearall no flag Selected (7 widgets)'),
     (Dr 'MAPKEY close pressing M to close the map'), (Dr 'MAPKEY reopen pressing M to open the map'),
     (M 'MAPSYNC flags=6 selected=0 satellite=no'),
+    (Dr 'OK PANELPLACE reopen the panel (443,829)-(623,883) is 8 below the map (165,210)-(901,821), centred (dx 0.0) and inside page-left (130,108)-(937,897) after 1.1 s'),
     (Dr 'OK FLAGSMATCH reopen every flag''s Selected matches its waypoint actor (selected: ; actors: )'), $endPass)
 Expect $buttons 'buttons' 0 'buttons: passes as written' 'All checks passed'
 Expect $buttons 'buttons' 0 'buttons -Target vm: passes' 'All checks passed' 'vm'
@@ -178,6 +182,16 @@ Expect ($buttons[0..($lastSync - 1)] + $buttons[($lastSync + 1)..($buttons.Count
 Expect ($buttons + @(M 'WARN Mark all skipped: the map is not open')) 'buttons' 1 'buttons: a WARN -> fails' 'WARN'
 Expect ($buttons + @(Dr 'FAIL ALLSELECTED markall every flag Selected (7 widgets) not: Military Outpost')) 'buttons' 1 'buttons: a driver FAIL -> fails' 'FAIL'
 Expect ($buttons + @(M 'REVIVE pawn=x was=y snapshot=0 onRevive=restore')) 'buttons' 1 'buttons: a revive action -> fails' 'REVIVE'
+# Story 5: the panel under the map (PANELPLACE on both key opens) and Waypoints' debug fit check (PANELFIT partial=0).
+Expect (Without $buttons 'OK PANELPLACE reopen') 'buttons' 1 'buttons: PANELPLACE on one open only -> fails' 'FAIL: #2\|.*OK PANELPLACE .*found 1'
+Expect (Without $buttons 'OK PANELPLACE') 'buttons' 1 'buttons: no PANELPLACE -> fails' 'FAIL: #2\|.*OK PANELPLACE .*found 0'
+Expect ($buttons + @(Dr 'FAIL PANELPLACE reopen the panel (0,0)-(0,0) not placed under the map within 8 s')) 'buttons' 1 'buttons: a FAIL PANELPLACE -> fails' 'FAIL: .*FAIL '
+Expect (Without $buttons 'PANELFIT') 'buttons' 1 'buttons: no PANELFIT -> fails' 'FAIL: .*PANELFIT rect='
+Expect ($buttons -replace 'hits=1 partial=0', 'hits=2 partial=1') 'buttons' 1 'buttons: PANELFIT partial=1 -> fails' 'FAIL: !.*PANELFIT .*partial='
+Expect ($buttons + @(M 'PANELFIT rect=(296,840)-(416,876) screen=1280x720 hits=12 partial=10')) 'buttons' 1 'buttons: a second PANELFIT with partial=10 -> fails' 'FAIL: !.*PANELFIT .*partial='
+Expect ($buttons -replace 'PANELFIT rect=\S+ screen=\S+ hits=1 partial=0', 'PANELFIT none (not painted yet)') 'buttons' 1 'buttons: only PANELFIT none -> fails' 'FAIL: .*PANELFIT rect='
+Expect ($buttons + @(M 'PANELFIT none (not painted yet)')) 'buttons' 0 'buttons: a PANELFIT none besides a good one passes' 'All checks passed'
+Expect ($buttons + @(M 'WARN PANELFIT check failed: boom')) 'buttons' 1 'buttons: a PANELFIT WARN -> fails' 'WARN'
 # Story 4: the map (-Map) and its flag count from the driver's table.
 Expect (Without $buttons '\] MAP ') 'buttons' 1 'buttons: no MAP line -> fails' 'FAIL: #1\|.*\] MAP .*found 0'
 Expect (Without $buttons 'OK FLAGCOUNT') 'buttons' 1 'buttons: no FLAGCOUNT -> fails' 'FAIL: .*OK FLAGCOUNT'
@@ -195,10 +209,10 @@ $noCore = @((U "Starting Lua mod 'WaypointsDriver'"), (Dr 'SCENARIO no-core'), (
 Expect $noCore 'no-core' 0 'no-core: passes as written' 'All checks passed'
 Expect ($noCore + @(M 'READY onRevive=restore')) 'no-core' 1 'no-core: a second Waypoints line -> fails' '#1'
 $oldCore = @((U "Starting Lua mod 'Nucleus'"), (Dr 'SCENARIO old-core'), (Dr 'OLDCORE published nucleus.version=0.1.0 (from Nucleus''s installed mod.json)'),
-    (M 'ERROR Nucleus 0.1.0 is older than Waypoints needs (>=0.5.0). Update Nucleus. Waypoints will not run.'),
+    (M 'ERROR Nucleus 0.1.0 is older than Waypoints needs (>=0.6.0). Update Nucleus. Waypoints will not run.'),
     (Dr 'OK NOWAYPOINTS match1 reached the match'), $endPass)
 Expect $oldCore 'old-core' 0 'old-core: passes as written' 'All checks passed'
-Expect ($oldCore -replace 'needs \(>=0\.5\.0\)', 'needs (>=0.2.0)') 'old-core' 1 'old-core: the need must be dependsOn''s version' 'is older than'
+Expect ($oldCore -replace 'needs \(>=0\.6\.0\)', 'needs (>=0.5.0)') 'old-core' 1 'old-core: the need must be dependsOn''s version' 'is older than'
 
 # ---------------------------------------------------------------- pair
 $victim = (Start-Log 'pair-victim') + @(
@@ -246,7 +260,7 @@ Expect ($pairHost + @(Dr 'KILL victim FALLBACK still alive 30 s after the signal
 Expect ($pairHost -replace 'class=Spectator_C', 'class=BP_ThirdPersonCharacter_C') 'pair-host' 1 'pair-host: victim became a monster -> fails (inconclusive)' 'BP_ThirdPersonCharacter_C'
 
 # ---------------------------------------------------------------- hand
-$hand = @((M 'CONNECT ok Nucleus 0.5.0 (pong)'), (M 'READY onRevive=restore buttons=yes'), (M "PAWN first $P1"),
+$hand = @((M 'CONNECT ok Nucleus 0.6.0 (pong)'), (M 'READY onRevive=restore buttons=yes'), (M "PAWN first $P1"),
     (M "LOST pawn=$P1 snapshot n=1 (locations 1, satellite 0)"), (M "REVIVE pawn=$P2 was=$P1 snapshot=1 onRevive=restore"),
     (M "RESTORE location 'A' respawned bReplicates=false via BeginDeferredActorSpawnFromClass"),
     (M 'RESTORED n=1 (from actors 1, from the snapshot 0, failed 0, old destroyed 1) flags=6 satelliteFlags=1'))

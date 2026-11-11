@@ -8,9 +8,17 @@
 -- nothing read from another player. Holds no UObject between callbacks (AGENTS.md): revive.lua sees plain facts, the
 -- deferred action re-finds the new pawn through a weak handle, and the open Journal crosses from its open event to a
 -- button press only as a weak handle. No per-tick work: it acts on HUD events, map opens and button presses only.
-local CORE, NEED, ME = "Nucleus", ">=0.5.0", "Waypoints"
+-- Story 5: the panel sits on the left page directly under the map square (core 0.6.0's Journal regions, PANEL_PLACE).
+-- With debug on (deploy.ps1 -Test) each map open measures it once with core.ui.debug.overlaps (PANELFIT lines).
+local CORE, NEED, ME = "Nucleus", ">=0.6.0", "Waypoints"
 local DELAY_MS = 500 -- after the revive's HUD event, so the game has finished possessing the new pawn
 local SNAPSHOT_MS = 50 -- the snapshot at the death runs this much later, outside core's HUD tick (it costs about 2 ms)
+-- The Mark all / Clear all panel: on the left page, centred directly under the map square (core 0.6.0's measured `map`
+-- region: the panel stays collapsed until the new Journal's first paint, so it shows about 1-1.5 s after each open).
+local PANEL_PLACE = { host = "journal", near = "map", side = "below", align = "center", gap = "tight" }
+-- Debug-only fit check (PANELFIT): first try this long after `opened` (the map region is valid within 4 journal
+-- ticks), then on "not painted yet" and the like every RETRY_MS, at most FIT_RETRIES more times.
+local FIT_MS, FIT_RETRY_MS, FIT_RETRIES = 2500, 1000, 3
 
 local source = debug.getinfo(1, "S").source:gsub("^@", "")
 local scriptDir = source:match("^(.*)[/\\]") or "."
@@ -25,6 +33,7 @@ local revive = require("revive")
 local waypoints = require("waypoints")
 local mapbuttons = require("mapbuttons")
 local game = require("game")
+local panelfit = require("panelfit")
 
 -- ---------------------------------------------------------------- settings
 -- deploy.ps1 generates Scripts/settings.lua from mod.json (onRevive: restore | clear). Until core's settings service
@@ -46,7 +55,7 @@ end
 local settings, settingsProblem = loadSettings()
 
 -- ---------------------------------------------------------------- Mark all and Clear all (story 3)
--- A panel in the map page's bottom-right corner holding the two buttons, created before the Journal watcher so that on
+-- A panel under the map square (PANEL_PLACE) holding the two buttons, created before the Journal watcher so that on
 -- every open core attaches them before our `opened` runs. The open Journal is kept only as core's weak handle, taken on
 -- `opened` and freed on `closed`/`lost`; a press derefs it (nil: the map is not open). Returns true when set up; without
 -- core's panel, button or Journal API one ERROR line, and the revive fix keeps running.
@@ -75,8 +84,38 @@ local function setupButtons(core, log)
         if not okP then log.error("%s failed: %s", label, tostring(err)) end
     end
     local p -- the panel's handle, removed again (with whatever got into it) when the setup fails half way
+    -- Story 5, debug only: on each `opened`, measure the placed panel with core.ui.debug.overlaps FIT_MS later (from
+    -- the game thread), retrying "not painted yet" and the like; a newer open, a close or a loss makes it stale. Holds
+    -- only core's element handle. With debug off (or no overlaps) nothing is scheduled and overlaps is never called.
+    local gen, fitWarned = 0, false
+    local function fit(my, tries, ms)
+        local function go()
+            if my ~= gen then return end -- stale: the map closed or opened again since
+            local overlaps = type(ui.debug) == "table" and ui.debug.overlaps or nil
+            if type(overlaps) ~= "function" or p == nil then return end
+            local okO, list, info = pcall(overlaps, p)
+            if not okO then
+                if not fitWarned then fitWarned = true; log.warn("PANELFIT check failed: %s", tostring(list)) end
+                return
+            end
+            if list == nil then
+                if tries < FIT_RETRIES then fit(my, tries + 1, FIT_RETRY_MS) else log.info("%s", panelfit.none(info)) end
+                return
+            end
+            local hits, partial = panelfit.classify(list, type(info) == "table" and info.rect or nil)
+            for _, l in ipairs(panelfit.lines(info, hits, partial)) do log.info("%s", l) end
+        end
+        local okL = type(ExecuteInGameThreadWithDelay) == "function" and pcall(ExecuteInGameThreadWithDelay, ms, function()
+            local okG, e = pcall(go)
+            if not okG and not fitWarned then fitWarned = true; log.warn("PANELFIT check failed: %s", tostring(e)) end
+        end)
+        return okL
+    end
+    local function fitWanted()
+        return log.debugEnabled == true and type(ui.debug) == "table" and type(ui.debug.overlaps) == "function"
+    end
     local okS, err = pcall(function()
-        p = panel.create{ id = "waypoints", place = { host = "journal", corner = "bottom-right" }, layout = "horizontal" }
+        p = panel.create{ id = "waypoints", place = PANEL_PLACE, layout = "horizontal" }
         button.create{ id = "markAll", label = "Mark all", place = { panel = p }, onClick = function() press(mapbuttons.markAll, "Mark all") end }
         button.create{ id = "clearAll", label = "Clear all", place = { panel = p }, onClick = function() press(mapbuttons.clearAll, "Clear all") end }
         journal.watch(function(j, info)
@@ -84,11 +123,14 @@ local function setupButtons(core, log)
                 local event = type(info) == "table" and info.event or nil
                 if event == "opened" then
                     free()
+                    gen = gen + 1
+                    if fitWanted() then fit(gen, 0, FIT_MS) end
                     if j == nil then return end
                     local okR, h = pcall(core.ref, j)
                     if okR then handle = h else log.warn("map open: could not take a handle on the Journal (%s)", tostring(h)) end
                     mapbuttons.syncOnOpen(game, j, log)
                 elseif event == "closed" or event == "lost" then
+                    gen = gen + 1
                     free()
                 end
             end)
