@@ -10,7 +10,7 @@
   driver's EXPECT line (the map's distinct flag names minus the 2 marked by hand, plus 1 for a satellite flag) and a
   MAPSYNC after CLEARALL (the reopen), and MARKALL's flags equal the driver's MAP line (its table's count for the map
   the run travelled to); buttons also needs the panel placed under the map on both key opens (PANELPLACE) and a
-  PANELFIT with partial=0 (none above 0); and for probe, the story 2 answers.
+  PANELFIT with a numeric rect, at least one hit and partial=0 on at least 2 opens (none above 0); and for probe, the story 2 answers.
   Exit code 1 when any check fails; otherwise prints "All checks passed."
   Scenarios (run.ps1 drives them): probe, revive, death, buttons, no-core, old-core. Pair scenarios (tools/vm/pair.ps1 with
   test/pair/waypoints-scenarios.ps1): pair-victim and pair-hostvictim judge the modded player's log, pair-host the host's
@@ -132,7 +132,7 @@ $expect = @{
         # Story 5: the panel under the map square. Both key opens: placed where the intent says, in the host canvas's
         # units (driver PANELPLACE); and Waypoints' debug-only fit check: no drawn widget cuts into the panel.
         "#2|\[$D\] OK PANELPLACE "
-        "\[$C\] PANELFIT rect=.* partial=0\s*$"
+        "\[$C\] PANELFIT rect=\(-?\d+,-?\d+\)-\(-?\d+,-?\d+\) screen=\d+x\d+ hits=[1-9]\d* partial=0\s*$"
         "!\[$C\] PANELFIT .*partial=[1-9]"
     )
     'death' = $driven + @(
@@ -268,6 +268,9 @@ if ($Scenario -eq 'buttons') {
         $rule = "MARKALL flags=$gf2 is $mkey's $mf"
         if ($gf2 -eq $mf) { Pass $rule } else { Fail $rule }
     } else { Fail 'MARKALL flags is the map''s count (no MAP or MARKALL line)' }
+    # Story 5: both key opens measured (every kept run logged 3: the Lua open while marking plus both key opens).
+    $fits = @($lines | Where-Object { $_ -match "\[$C\] PANELFIT rect=\(-?\d+,-?\d+\)-\(-?\d+,-?\d+\) screen=\d+x\d+ hits=[1-9]\d* partial=0\s*$" }).Count
+    if ($fits -ge 2) { Pass "at least 2 good PANELFIT lines (found $fits)" } else { Fail "at least 2 good PANELFIT lines (found $fits)" }
 }
 if ($Scenario -in 'probe', 'revive', 'pair-victim', 'pair-hostvictim') {
     Write-Host '--- answers ---'

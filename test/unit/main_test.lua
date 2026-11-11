@@ -489,6 +489,14 @@ do -- Painted on the second try: one retry, then the PANELFIT line.
     eq(count("PANELFIT rect=.* hits=0 partial=0$"), 1, "painted on the retry: PANELFIT hits=0 partial=0")
     eq(count("PANELFIT none"), 0, "painted on the retry: no PANELFIT none")
 end
+do -- A list but no valid panel rect in info: PANELFIT none (no panel rect), never a PANELFIT rect=? line.
+    local core = debugCore{ overlaps = function() return { { path = "/J.Paper", class = "Image", rect = { l = 0, t = 0, r = 9, b = 9 } } }, { screen = { w = 1280, h = 720 } } end }
+    journalEvent(core, mapFlags(), "opened")
+    W.runDelayed()
+    eq(count("^%[Waypoints%] PANELFIT none %(no panel rect%)$"), 1, "no info.rect: PANELFIT none (no panel rect)")
+    eq(count("PANELFIT rect="), 0, "no info.rect: no PANELFIT rect= line")
+    eq(count("PANELHIT"), 0, "no info.rect: no PANELHIT line")
+end
 do -- Stale: closed before the check, or a newer open: nothing logged for the old open.
     local core = debugCore{ overlaps = function() return {}, fitInfo() end }
     journalEvent(core, mapFlags(), "opened")

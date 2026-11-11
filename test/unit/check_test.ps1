@@ -145,9 +145,9 @@ $buttons = (Start-Log 'buttons') + @(
     (Dr 'OK MARKED mark 2 waypoints, one waypoint actor each (Crash Site,Weather Station)'),
     (Dr 'MAPKEY M (IA_Map keys in IMC_Default: M)'), (Dr 'OK MAPKEY IA_Map is bound to the letter M in IMC_Default'),
     (Dr 'MAPKEY buttons pressing M to open the map'), (M 'MAPSYNC flags=6 selected=2 satellite=no'),
-    (Dr 'OK PANELPLACE buttons the panel (443,829)-(623,883) is 8 below the map (165,210)-(901,821), centred (dx 0.0) and inside page-left (130,108)-(937,897) after 1.3 s'),
+    (Dr 'OK PANELPLACE buttons the panel (443,829)-(623,883), the map (165,210)-(901,821), page-left (130,108)-(937,897): top - (map bottom + 8) = 0.0, centre dx = 0.0, inside page-left=true after 0.3 s (below-map)'),
     (M 'PANELFIT rect=(296,840)-(416,876) screen=1280x720 hits=1 partial=0'),
-    (M 'PANELHIT under Image /Game/Graphics/Journal/Journal.Journal_C_1.WidgetTree.MapWidget.WidgetTree.NN_LeftFieldPaper (87,72)-(625,598)'),
+    (M 'PANELHIT under Image /Game/Graphics/Journal/Journal.Journal_C_1.WidgetTree.MapWidget.WidgetTree.NN_LeftFieldPaper (87,72)-(625,898)'),
     (Dr 'EXPECT buttons marked=5 flags=6 satellite=yes (Weather Station,Crash Site,Installation Entrance #1,Installation Entrance #2,Construction Site,Military Outpost)'),
     (Dr 'OK FLAGS buttons the map has 6 location flags'), (Dr 'OK FLAGCOUNT buttons 6 distinct location flags on TowerIsland (the table says 6)'),
     (Dr 'OK BPOINT markall ''markAll'' is on the map page with a screen rectangle (3000,1300)-(3100,1330)'), (Dr 'OK BONE markall one Waypoints panel and one ''markAll'' button on the map page (1, 1)'),
@@ -162,7 +162,8 @@ $buttons = (Start-Log 'buttons') + @(
     (Dr 'OK ALLCLEARED clearall no live waypoint actor left (0: )'), (Dr 'OK NONESELECTED clearall no flag Selected (7 widgets)'),
     (Dr 'MAPKEY close pressing M to close the map'), (Dr 'MAPKEY reopen pressing M to open the map'),
     (M 'MAPSYNC flags=6 selected=0 satellite=no'),
-    (Dr 'OK PANELPLACE reopen the panel (443,829)-(623,883) is 8 below the map (165,210)-(901,821), centred (dx 0.0) and inside page-left (130,108)-(937,897) after 1.1 s'),
+    (Dr 'OK PANELPLACE reopen the panel (443,829)-(623,883), the map (165,210)-(901,821), page-left (130,108)-(937,897): top - (map bottom + 8) = 0.0, centre dx = 0.0, inside page-left=true after 0.3 s (below-map)'),
+    (M 'PANELFIT rect=(296,840)-(416,876) screen=1280x720 hits=2 partial=0'),
     (Dr 'OK FLAGSMATCH reopen every flag''s Selected matches its waypoint actor (selected: ; actors: )'), $endPass)
 Expect $buttons 'buttons' 0 'buttons: passes as written' 'All checks passed'
 Expect $buttons 'buttons' 0 'buttons -Target vm: passes' 'All checks passed' 'vm'
@@ -189,8 +190,12 @@ Expect ($buttons + @(Dr 'FAIL PANELPLACE reopen the panel (0,0)-(0,0) not placed
 Expect (Without $buttons 'PANELFIT') 'buttons' 1 'buttons: no PANELFIT -> fails' 'FAIL: .*PANELFIT rect='
 Expect ($buttons -replace 'hits=1 partial=0', 'hits=2 partial=1') 'buttons' 1 'buttons: PANELFIT partial=1 -> fails' 'FAIL: !.*PANELFIT .*partial='
 Expect ($buttons + @(M 'PANELFIT rect=(296,840)-(416,876) screen=1280x720 hits=12 partial=10')) 'buttons' 1 'buttons: a second PANELFIT with partial=10 -> fails' 'FAIL: !.*PANELFIT .*partial='
-Expect ($buttons -replace 'PANELFIT rect=\S+ screen=\S+ hits=1 partial=0', 'PANELFIT none (not painted yet)') 'buttons' 1 'buttons: only PANELFIT none -> fails' 'FAIL: .*PANELFIT rect='
+Expect ($buttons -replace 'PANELFIT rect=\S+ screen=\S+ hits=\d partial=0', 'PANELFIT none (not painted yet)') 'buttons' 1 'buttons: only PANELFIT none -> fails' 'FAIL: .*PANELFIT rect='
 Expect ($buttons + @(M 'PANELFIT none (not painted yet)')) 'buttons' 0 'buttons: a PANELFIT none besides a good one passes' 'All checks passed'
+Expect ($buttons -replace 'PANELFIT rect=\(296,840\)-\(416,876\)', 'PANELFIT rect=?') 'buttons' 1 'buttons: PANELFIT rect=? (nothing compared) -> fails' 'FAIL: .*PANELFIT rect='
+Expect ($buttons -replace 'hits=\d partial=0', 'hits=0 partial=0') 'buttons' 1 'buttons: PANELFIT hits=0 (nothing under the panel) -> fails' 'FAIL: .*PANELFIT rect='
+$oneFit = @($buttons | Where-Object { $_ -notmatch 'PANELFIT rect=.* hits=2 partial=0' })
+Expect $oneFit 'buttons' 1 'buttons: only one good PANELFIT line -> fails' 'FAIL: at least 2 good PANELFIT lines \(found 1\)'
 Expect ($buttons + @(M 'WARN PANELFIT check failed: boom')) 'buttons' 1 'buttons: a PANELFIT WARN -> fails' 'WARN'
 # Story 4: the map (-Map) and its flag count from the driver's table.
 Expect (Without $buttons '\] MAP ') 'buttons' 1 'buttons: no MAP line -> fails' 'FAIL: #1\|.*\] MAP .*found 0'
