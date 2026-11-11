@@ -1,7 +1,7 @@
 -- game.lua: the only file that touches the game (UE4SS Lua). It is waypoints.lua's adapter G plus the pawn facts
 -- revive.lua needs. Every function is called inside one game-thread callback and returns plain data or objects that
 -- the caller uses within that same callback; nothing here is kept between callbacks (AGENTS.md).
--- Evidence for every class, property and call: the markers spec's marker-mechanics.md and the V8.1.2 decompile
+-- Evidence for every class, property and call: the Waypoints spec's flag-mechanics.md and the V8.1.2 decompile
 -- (Graphics/Journal/LevelLocationUI_C, SateliteUI_C, LevelWaypointActor_C, SatelliteWaypoint_C; InventoryUI_C.Player).
 -- Local only: it spawns and destroys the local, unreplicated waypoint actors and edits local widgets. No RPC, no
 -- replicated actor, nothing read from another player.
