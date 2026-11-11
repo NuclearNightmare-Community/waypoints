@@ -31,7 +31,7 @@
 param(
     [Parameter(Mandatory)] [string] $Instance,
     [switch] $Test,
-    [ValidateSet('probe', 'revive', 'death', 'buttons', 'no-core', 'old-core', 'pair-victim', 'pair-host', 'pair-hostvictim')]
+    [ValidateSet('probe', 'revive', 'death', 'buttons', 'buttons-revive', 'no-core', 'old-core', 'pair-victim', 'pair-host', 'pair-hostvictim')]
     [string] $Scenario = 'revive',
     [ValidateSet('', 'LowIsland', 'TowerIsland', 'Forest', 'Crevasse', IgnoreCase = $false)] [string] $Map = '',  # '': the driver's default (TowerIsland)
     [ValidateSet('', 'restore', 'clear')] [string] $OnRevive = '',  # '': mod.json's default

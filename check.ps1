@@ -12,7 +12,8 @@
   the run travelled to); buttons also needs the panel placed under the map on both key opens (PANELPLACE) and a
   PANELFIT with a numeric rect, at least one hit and partial=0 on at least 2 of the run's map opens (none above 0); and for probe, the story 2 answers.
   Exit code 1 when any check fails; otherwise prints "All checks passed."
-  Scenarios (run.ps1 drives them): probe, revive, death, buttons, no-core, old-core. Pair scenarios (tools/vm/pair.ps1 with
+  Scenarios (run.ps1 drives them): probe, revive, death, buttons, buttons-revive (the routine check: every check of
+  buttons and of revive, from one match), no-core, old-core. Pair scenarios (tools/vm/pair.ps1 with
   test/pair/waypoints-scenarios.ps1): pair-victim and pair-hostvictim judge the modded player's log, pair-host the host's
   driver. hand: a log from the README's hand check (Waypoints connected, no error, and every revive acted on).
   unit needs no log: it runs test.ps1.
@@ -26,7 +27,7 @@
 param(
     [string] $Instance,
     [string] $Log,
-    [ValidateSet('probe', 'revive', 'death', 'buttons', 'no-core', 'old-core', 'pair-victim', 'pair-host', 'pair-hostvictim', 'hand', 'unit')]
+    [ValidateSet('probe', 'revive', 'death', 'buttons', 'buttons-revive', 'no-core', 'old-core', 'pair-victim', 'pair-host', 'pair-hostvictim', 'hand', 'unit')]
     [string] $Scenario = 'revive',
     [ValidateSet('host', 'vm')] [string] $Target = 'host'
 )
@@ -87,6 +88,47 @@ $noAction = "!\[$C\] (REVIVE|REBOUND|AGAIN|RESTORED|CLEARED) "
 function Get-RestoredChecks([string] $p) {
     @("\[$D\] OK ONE $p ", "\[$D\] OK BOUND $p ", "\[$D\] OK LOCAL $p ", "\[$D\] OK DRAWN $p ", "\[$D\] OK FLAGSMATCH $p ")
 }
+# The revive checks (revive, and the routine buttons-revive): restore, then with clear nothing left.
+$reviveChecks = @(
+    "\[$C\] LOST pawn=.* snapshot n=3 \(locations 2, satellite 1\)"
+    "#2|\[$C\] REVIVE pawn="
+    "\[$C\] REVIVE pawn=.* snapshot=3 onRevive=restore\s*$"
+    "\[$C\] REVIVE pawn=.* onRevive=clear\s*$"
+    "\[$C\] RESTORED n=3 \(from actors 3, from the snapshot 0, failed 0, old destroyed 3\)"
+    "\[$C\] RESTORE satellite 'Satellite' respawned bReplicates=false"
+    "\[$C\] CLEARED n=3 \(failed 0\)"
+    "!\[$C\] RESTORED .*failed [1-9]"
+    "!\[$C\] CLEARED .*failed [1-9]"
+    "!\[$C\] REBOUND "
+    "\[$D\] OK DRAWN before "
+    "\[$D\] OK NONE revive2 ", "\[$D\] OK NOPAINT revive2 ", "\[$D\] OK FLAGSNONE revive2 "
+    "\[$D\] ANSWER journal-same-after-revive=(yes|no)"
+    "\[$D\] SOLO revive1 EOGLock=true ok=true", "\[$D\] SOLO revive2 EOGLock=false ok=true"
+) + (Get-RestoredChecks 'revive1') + (Get-DeathChecks 'revive1') + (Get-DeathChecks 'revive2')
+
+# The buttons checks (buttons, and the routine buttons-revive): Mark all, Clear all, the reopen, the panel's place.
+$buttonsChecks = @(
+    "\[$D\] OK MAPKEY ", "\[$D\] EXPECT buttons marked=\d+ flags=\d+ satellite=(yes|no) "
+    # The map the run travelled to (-Map, default Tower Island), its flag count from the driver's table.
+    "#1|\[$D\] MAP \w+ /Game/Maps/\S+ flags=\d+\s*$", "\[$D\] OK FLAGCOUNT "
+    # Mark all: one press, the 2 flags marked by hand already up, nothing failed; the world agrees (driver).
+    "#1|\[$C\] MARKALL "
+    "\[$C\] MARKALL marked=\d+ already=2 failed=0 waypoints=\d+ flags=\d+ satellite=(yes|none)\s*$"
+    "\[$C\] MARK location '"
+    "\[$D\] OK BPOINT markall ", "\[$D\] OK ALLMARKED markall ", "\[$D\] OK ALLSELECTED markall ", "\[$D\] OK LOCAL markall "
+    # Clear all: one press, nothing failed, no waypoint left.
+    "#1|\[$C\] CLEARALL "
+    "\[$C\] CLEARALL cleared=\d+ direct=\d+ failed=0 waypoints=0 flags=\d+\s*$"
+    "\[$D\] OK BPOINT clearall ", "\[$D\] OK ALLCLEARED clearall ", "\[$D\] OK NONESELECTED clearall "
+    # Every map open synced (the Lua open while marking, the key opens), and the flags match the actors on the reopen.
+    "\[$C\] MAPSYNC flags=\d+ selected=\d+ satellite=(yes|no|none)\s*$"
+    "\[$D\] OK FLAGSMATCH reopen "
+    # Story 5: the panel under the map square. Both key opens: placed where the intent says, in the host canvas's
+    # units (driver PANELPLACE); and Waypoints' debug-only fit check: no drawn widget cuts into the panel.
+    "#2|\[$D\] OK PANELPLACE "
+    "\[$C\] PANELFIT rect=\(-?\d+,-?\d+\)-\(-?\d+,-?\d+\) screen=\d+x\d+ hits=[1-9]\d* partial=0\s*$"
+    "!\[$C\] PANELFIT .*partial=[1-9]"
+)
 $expect = @{
     'probe' = $driven + @(
         "\[$C\] PAWN first "
@@ -94,47 +136,10 @@ $expect = @{
         "\[$D\] OK MARKED mark 4 waypoints", "\[$D\] OK DRAWN before ", "\[$D\] OK REPRO ", "\[$D\] OK RESPAWN-DRAWN ", "\[$D\] OK LIVENESS ", "\[$D\] OK LIVEOK "
         "\[$D\] ANSWER construct-every-open=(yes|no|unknown) ", "\[$D\] ANSWER repair "
     )
-    'revive' = $driven + @(
-        "\[$C\] PAWN first "
-        "\[$C\] LOST pawn=.* snapshot n=3 \(locations 2, satellite 1\)"
-        "#2|\[$C\] REVIVE pawn="
-        "\[$C\] REVIVE pawn=.* snapshot=3 onRevive=restore\s*$"
-        "\[$C\] REVIVE pawn=.* onRevive=clear\s*$"
-        "\[$C\] RESTORED n=3 \(from actors 3, from the snapshot 0, failed 0, old destroyed 3\)"
-        "\[$C\] RESTORE satellite 'Satellite' respawned bReplicates=false"
-        "\[$C\] CLEARED n=3 \(failed 0\)"
-        "!\[$C\] RESTORED .*failed [1-9]"
-        "!\[$C\] CLEARED .*failed [1-9]"
-        "!\[$C\] REBOUND "
-        "\[$D\] OK MARKED mark 3 waypoints", "\[$D\] OK DRAWN before "
-        "\[$D\] OK NONE revive2 ", "\[$D\] OK NOPAINT revive2 ", "\[$D\] OK FLAGSNONE revive2 "
-        "\[$D\] ANSWER journal-same-after-revive=(yes|no)"
-        "\[$D\] SOLO revive1 EOGLock=true ok=true", "\[$D\] SOLO revive2 EOGLock=false ok=true"
-    ) + (Get-RestoredChecks 'revive1') + (Get-DeathChecks 'revive1') + (Get-DeathChecks 'revive2')
-    'buttons' = $driven + @(
-        "\[$C\] PAWN first "
-        $noAction
-        "\[$D\] OK MARKED mark 2 waypoints", "\[$D\] OK MAPKEY ", "\[$D\] EXPECT buttons marked=\d+ flags=\d+ satellite=(yes|no) "
-        # The map the run travelled to (-Map, default Tower Island), its flag count from the driver's table.
-        "#1|\[$D\] MAP \w+ /Game/Maps/\S+ flags=\d+\s*$", "\[$D\] OK FLAGCOUNT "
-        # Mark all: one press, the 2 flags marked by hand already up, nothing failed; the world agrees (driver).
-        "#1|\[$C\] MARKALL "
-        "\[$C\] MARKALL marked=\d+ already=2 failed=0 waypoints=\d+ flags=\d+ satellite=(yes|none)\s*$"
-        "\[$C\] MARK location '"
-        "\[$D\] OK BPOINT markall ", "\[$D\] OK ALLMARKED markall ", "\[$D\] OK ALLSELECTED markall ", "\[$D\] OK LOCAL markall "
-        # Clear all: one press, nothing failed, no waypoint left.
-        "#1|\[$C\] CLEARALL "
-        "\[$C\] CLEARALL cleared=\d+ direct=\d+ failed=0 waypoints=0 flags=\d+\s*$"
-        "\[$D\] OK BPOINT clearall ", "\[$D\] OK ALLCLEARED clearall ", "\[$D\] OK NONESELECTED clearall "
-        # Every map open synced (the Lua open while marking, the key opens), and the flags match the actors on the reopen.
-        "\[$C\] MAPSYNC flags=\d+ selected=\d+ satellite=(yes|no|none)\s*$"
-        "\[$D\] OK FLAGSMATCH reopen "
-        # Story 5: the panel under the map square. Both key opens: placed where the intent says, in the host canvas's
-        # units (driver PANELPLACE); and Waypoints' debug-only fit check: no drawn widget cuts into the panel.
-        "#2|\[$D\] OK PANELPLACE "
-        "\[$C\] PANELFIT rect=\(-?\d+,-?\d+\)-\(-?\d+,-?\d+\) screen=\d+x\d+ hits=[1-9]\d* partial=0\s*$"
-        "!\[$C\] PANELFIT .*partial=[1-9]"
-    )
+    'revive' = $driven + @("\[$C\] PAWN first ", "\[$D\] OK MARKED mark 3 waypoints") + $reviveChecks
+    'buttons' = $driven + @("\[$C\] PAWN first ", $noAction, "\[$D\] OK MARKED mark 2 waypoints") + $buttonsChecks
+    # The routine check: both in one match; the revive part marks again after Clear all (phase remark).
+    'buttons-revive' = $driven + @("\[$C\] PAWN first ", "\[$D\] OK MARKED mark 2 waypoints", "\[$D\] OK MARKED remark 3 waypoints") + $buttonsChecks + $reviveChecks
     'death' = $driven + @(
         "\[$C\] PAWN first "
         # Soft since V8.1.3: the game's managed death no longer calls RemoveAllWidgets, so the HUD (and core's `lost`)
@@ -223,7 +228,7 @@ if ($Scenario -notin 'no-core', 'old-core', 'pair-host') {
     if ($open) { $unacted += $open }
     if ($unacted) { Fail "every REVIVE/REBOUND/AGAIN is followed by RESTORED or CLEARED (not: $($unacted -join ', '))" }
     elseif ($acted) { Pass "every REVIVE/REBOUND/AGAIN is followed by RESTORED or CLEARED ($acted)" }
-    if ($Scenario -in 'revive', 'pair-victim', 'pair-hostvictim') {
+    if ($Scenario -in 'revive', 'buttons-revive', 'pair-victim', 'pair-hostvictim') {
         $il, $iv = (IndexOf "\[$C\] LOST pawn="), (IndexOf "\[$C\] REVIVE pawn=")
         if ($il -ge 0 -and $iv -gt $il) { Pass 'the snapshot (LOST) comes before the first REVIVE' } else { Fail "LOST before REVIVE (LOST at line $il, REVIVE at line $iv)" }
     }
@@ -245,7 +250,7 @@ if ($Target -eq 'host' -and $Scenario -notin 'no-core', 'old-core') {
     if ($slowHard) { Fail "$rule (not: $($slowHard -join '; '))" }
     else { Pass ("$rule" + $(if ($slowSoft) { " ($slowSoft during one: soft)" } else { '' })) }
 }
-if ($Scenario -eq 'buttons') {
+if ($Scenario -in 'buttons', 'buttons-revive') {
     # The AC: MARKALL marked = the map's distinct flag names - 2 + 1 with a satellite flag; flags = the distinct names.
     $exp = $lines | Where-Object { $_ -match "\[$D\] EXPECT buttons marked=(\d+) flags=(\d+) satellite=(yes|no) " } | Select-Object -First 1
     $mk = $lines | Where-Object { $_ -match "\[$C\] MARKALL marked=(\d+) already=\d+ failed=\d+ waypoints=(\d+) flags=(\d+) satellite=(\w+)" } | Select-Object -First 1
@@ -272,7 +277,7 @@ if ($Scenario -eq 'buttons') {
     $fits = @($lines | Where-Object { $_ -match "\[$C\] PANELFIT rect=\(-?\d+,-?\d+\)-\(-?\d+,-?\d+\) screen=\d+x\d+ hits=[1-9]\d* partial=0\s*$" }).Count
     if ($fits -ge 2) { Pass "at least 2 good PANELFIT lines (found $fits)" } else { Fail "at least 2 good PANELFIT lines (found $fits)" }
 }
-if ($Scenario -in 'probe', 'revive', 'pair-victim', 'pair-hostvictim') {
+if ($Scenario -in 'probe', 'revive', 'buttons-revive', 'pair-victim', 'pair-hostvictim') {
     Write-Host '--- answers ---'
     $lines | Where-Object { $_ -match "\[$D\] (ANSWER|MAPOPEN|PAINT|AIM|LIVENESS|REPAIR|RESPAWN|JOURNAL) " } | ForEach-Object { Write-Host ($_ -replace '^.*\[WaypointsDriver\] ', '') }
 }

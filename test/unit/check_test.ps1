@@ -208,6 +208,26 @@ $forest = $buttons -replace 'MAP TowerIsland /Game/Maps/SmallLoweIsland/SmallMap
 Expect $forest 'buttons' 0 'buttons: Forest (7 flags) passes' "MARKALL flags=7 is Forest's 7"
 Expect ($forest + @(Dr 'MAP Crevasse /Game/Maps/CravasseMapV2/CravasseMap flags=9')) 'buttons' 1 'buttons: two MAP lines -> fails' 'FAIL: #1\|.*\] MAP .*found 2'
 
+# ---------------------------------------------------------------- buttons-revive (the routine check, one match)
+# The buttons run, then (nothing up after Clear all) the revive run with its marking phase named remark.
+$combined = (Start-Log 'buttons-revive') + $buttons[10..($buttons.Count - 2)] + @($revive[10..($revive.Count - 1)] -replace 'OK MARKED mark 3', 'OK MARKED remark 3')
+Expect $combined 'buttons-revive' 0 'buttons-revive: passes as written' 'All checks passed'
+Expect $combined 'buttons-revive' 0 'buttons-revive -Target vm: passes' 'All checks passed' 'vm'
+Expect $combined 'buttons' 1 'buttons-revive log judged as buttons -> fails (its revives are actions)' 'REVIVE'
+Expect (Without $combined 'OK MARKED remark') 'buttons-revive' 1 'buttons-revive: no second marking -> fails' 'MARKED remark 3'
+Expect (Without $combined 'OK MARKED mark 2') 'buttons-revive' 1 'buttons-revive: no marking before Mark all -> fails' 'MARKED mark 2'
+Expect (Without $combined 'RESTORED n=3') 'buttons-revive' 1 'buttons-revive: no RESTORED -> fails' 'RESTORED n=3'
+Expect (Without $combined 'CLEARED n=3') 'buttons-revive' 1 'buttons-revive: no CLEARED -> fails' 'not: REVIVE'
+Expect (Without $combined 'LOST pawn=') 'buttons-revive' 1 'buttons-revive: no snapshot -> fails' 'LOST'
+Expect (Without $combined 'CLEARALL') 'buttons-revive' 1 'buttons-revive: no CLEARALL -> fails' 'CLEARALL'
+Expect (Without $combined 'OK PANELPLACE reopen') 'buttons-revive' 1 'buttons-revive: PANELPLACE on one open only -> fails' 'FAIL: #2\|.*OK PANELPLACE .*found 1'
+Expect ($combined -replace 'MARKALL marked=5 already=2', 'MARKALL marked=4 already=2') 'buttons-revive' 1 'buttons-revive: MARKALL must match the map -> fails' 'MARKALL matches the map'
+Expect ($combined + @(M "REBOUND pawn=$P3 was=$P2 (a new pawn without a HUD loss: restore only, never clear)") + (Restored)) 'buttons-revive' 1 'buttons-revive: a REBOUND -> fails' 'REBOUND'
+Expect ($combined -replace 'hits=1 partial=0', 'hits=2 partial=1') 'buttons-revive' 1 'buttons-revive: PANELFIT partial=1 -> fails' 'FAIL: !.*PANELFIT .*partial='
+Expect (Without $combined 'OK FLAGSMATCH revive1') 'buttons-revive' 1 'buttons-revive: no FLAGSMATCH after the revive -> fails' 'FLAGSMATCH revive1'
+Expect (Without $combined 'OK FLAGSMATCH reopen') 'buttons-revive' 1 'buttons-revive: no FLAGSMATCH on the reopen -> fails' 'FLAGSMATCH reopen'
+Expect (Without $combined 'OK SPECTATOR revive2') 'buttons-revive' 1 'buttons-revive: no spectator after the second kill -> fails' 'SPECTATOR revive2'
+
 # ---------------------------------------------------------------- no-core, old-core
 $noCore = @((U "Starting Lua mod 'WaypointsDriver'"), (Dr 'SCENARIO no-core'), (U "Starting Lua mod 'Waypoints'"),
     (M 'Nucleus is not installed. Waypoints will not run.'), (Dr 'OK NOWAYPOINTS match1 reached the match; Waypoints'' one line is judged by check.ps1'), $endPass)

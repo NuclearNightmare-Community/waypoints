@@ -230,6 +230,8 @@ try {
     Ok (Test-Path (Join-Path $mods 'WaypointsDriver\Scripts\main.lua')) 'deploy -Test: the driver installed'
     $d = Deploy @('-Test', '-Scenario', 'buttons')
     Ok ($d.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $mods 'WaypointsDriver\Scripts\scenario.txt')) -eq 'buttons') 'deploy -Test: buttons' $d.Out
+    $d = Deploy @('-Test', '-Scenario', 'buttons-revive')
+    Ok ($d.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $mods 'WaypointsDriver\Scripts\scenario.txt')) -eq 'buttons-revive') 'deploy -Test: buttons-revive (the routine check)' $d.Out
     # -Map (story 4): only a key of the driver's table, written to map.txt with -Test; a stale one removed.
     $mapTxt = Join-Path $mods 'WaypointsDriver\Scripts\map.txt'
     Ok (-not (Test-Path $mapTxt)) 'deploy -Test without -Map: no map.txt (the driver''s default map)'
