@@ -115,7 +115,7 @@ Eq (@($m.settings.onRevive.values) -join ',') 'restore,clear' 'mod.json: values 
 Eq $m.settings.onRevive.default 'restore' 'mod.json: default restore'
 Ok ($m.id -eq 'waypoints' -and $m.name -eq 'Waypoints' -and $m.version -eq '0.2.0' -and $m.scope -eq 'client') 'mod.json: id, name, version 0.2.0, scope'
 Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '>=0.6.0') 'mod.json: dependsOn nucleus >=0.6.0 (a minimum, core story 18; the Journal regions it is verified on)'
-Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.2.1' -and $m.game.build -eq '26512322') 'mod.json: ue4ss and game build (V8.2.1 / 26512322)'
+Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.2.3' -and $m.game.build -eq '26601774') 'mod.json: ue4ss and game build (V8.2.3 / 26601774)'
 # The runtime need in main.lua equals dependsOn's minimum.
 $mainLua = Get-Content (Join-Path $repo 'Scripts\main.lua') -Raw
 Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", ">=0.6.0", "Waypoints"') 'main.lua: need = dependsOn (>=0.6.0)'
