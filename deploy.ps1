@@ -25,7 +25,7 @@
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -OnRevive clear
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Test -Scenario revive
-  ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2-build26512322 -Test -Scenario buttons -Map Forest
+  ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2.3-build26601774 -Test -Scenario buttons -Map Forest
   ./deploy.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Remove
 #>
 param(

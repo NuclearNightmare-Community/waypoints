@@ -35,10 +35,10 @@
   plays on the host. The log is kept as <scenario>.vm.log, or <scenario>-<map>.vm.log with -Map, and judged with check.ps1 -Target vm.
   Every Waypoints scenario runs in the VM too (none judges timing).
 .EXAMPLE
-  ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2-build26512322 -Scenario buttons-revive # the routine check
+  ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2.3-build26601774 -Scenario buttons-revive # the routine check
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario revive
   ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.1.2-build26193463 -Scenario probe -Target vm
-  ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2-build26512322 -Scenario buttons -Map Crevasse
+  ./run.ps1 -Instance C:\...\nuclear-nightmare\game-instances\v8.2.3-build26601774 -Scenario buttons -Map Crevasse
 #>
 param(
     [Parameter(Mandatory)] [string] $Instance,
