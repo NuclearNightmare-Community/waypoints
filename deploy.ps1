@@ -6,13 +6,16 @@
   mod.json version satisfies Waypoints' dependsOn (a minimum, not below the installed core's compat.floor;
   deploy-lib.ps1). -Force installs anyway, for the failure scenarios
   (Waypoints' own runtime check then has to catch it).
-  Installs ue4ss/Mods/Waypoints/{mod.json, Scripts/main.lua, revive.lua, waypoints.lua, game.lua} and generates
-  Scripts/settings.lua from mod.json's setting defaults (-OnRevive overrides onRevive). Writes "Waypoints : 1" into
+  Installs ue4ss/Mods/Waypoints/{mod.json, Scripts/main.lua, revive.lua, waypoints.lua, game.lua, ...}. The onRevive
+  setting lives in Mods/Waypoints/settings.json, the values file Nucleus's settings service keeps (Nucleus 0.9.0):
+  -OnRevive writes it ({"onRevive":"<value>"}); without it an existing settings.json survives the redeploy untouched
+  (it is the player's); with -Test and no -OnRevive it is reset to restore, so a run never inherits an earlier run's
+  value. Writes "Waypoints : 1" into
   mods.txt right below Nucleus's line and above "Keybinds : 1", moving it there if it was elsewhere. Never writes
   outside Mods/Waypoints, Mods/WaypointsDriver and those mods.txt lines, and never bundles any of core's files.
   -Test also installs the test driver (test/WaypointsDriver as Mods/WaypointsDriver, between Nucleus and Waypoints), writes
-  the scenario to its Scripts/scenario.txt, and turns on Waypoints' DEBUG lines (settings.lua debug = true), which
-  check.ps1 reads. The driver is never shipped.
+  the scenario to its Scripts/scenario.txt, and writes Scripts/dev.lua (test only) to turn on Waypoints' DEBUG lines
+  (debug = true), which check.ps1 reads. The driver and dev.lua are never shipped.
   -Map (with -Test) writes the solo scenarios' match map to the driver's Scripts/map.txt: only a key of the driver's
   fixed table (LowIsland, TowerIsland, Forest, Crevasse); without -Map there is no map.txt (the driver's default,
   Tower Island). Every test deploy removes a stale map.txt first. -Map without -Test writes nothing (a warning).
@@ -101,16 +104,22 @@ if ($problem) {
     Write-Warning "forced: $problem"
 }
 
-# Waypoints' files, and its settings from mod.json.
+# Waypoints' files. Its setting: settings.json from -OnRevive, else the existing one kept as it was.
 $override = @{}
+if ($Test -and -not $OnRevive) { $OnRevive = 'restore' }
 if ($OnRevive) { $override.onRevive = $OnRevive }
-$settings = ConvertTo-SettingsLua -Manifest $manifest -Override $override -DebugLog:$Test
+$settingsJson = ConvertTo-SettingsJson -Manifest $manifest -Override $override
+$dev = if ($Test) { ConvertTo-DevLua -DebugLog }
+$valuesFile = Join-Path $modsDir "$name\settings.json"
+$keptValues = if (-not $settingsJson -and (Test-Path -LiteralPath $valuesFile -PathType Leaf)) { [IO.File]::ReadAllBytes($valuesFile) }
 foreach ($d in $mine) { Remove-Item (Join-Path $modsDir $d) -Recurse -Force -ErrorAction SilentlyContinue }
 $dest = Join-Path $modsDir "$name\Scripts"
 New-Item -ItemType Directory -Force $dest | Out-Null
 Copy-Item (Join-Path $here 'mod.json') (Join-Path $modsDir $name) -Force
 foreach ($f in $files) { Copy-Item (Join-Path $here "Scripts\$f") $dest -Force }
-[IO.File]::WriteAllText((Join-Path $dest 'settings.lua'), $settings, [Text.UTF8Encoding]::new($false))
+if ($dev) { [IO.File]::WriteAllText((Join-Path $dest 'dev.lua'), $dev, [Text.UTF8Encoding]::new($false)) }
+if ($settingsJson) { [IO.File]::WriteAllText($valuesFile, $settingsJson, [Text.UTF8Encoding]::new($false)) }
+elseif ($keptValues) { [IO.File]::WriteAllBytes($valuesFile, $keptValues) }
 
 # mods.txt: below core, above Keybinds. The driver goes between core and Waypoints (its old-core mode must run before
 # Waypoints' main.lua).
@@ -128,5 +137,5 @@ Write-ModsTxt $modsTxt $file $lines
 
 Write-Host "$name $($manifest.version) deployed$(if ($Test) { " with $driver (scenario $Scenario$(if ($Map) { ", map $Map" }))" }):"
 Get-ChildItem (Join-Path $modsDir $name) -Recurse -File | ForEach-Object { Write-Host "  Mods/$name/$($_.FullName.Substring((Join-Path $modsDir $name).Length + 1)) ($($_.Length) bytes)" }
-Write-Host "  settings.lua: $(($settings -split "`n")[1])"
+Write-Host "  settings.json: $(if ($settingsJson) { "$settingsJson (written)" } elseif ($keptValues) { 'kept as it was' } else { "none (Nucleus uses mod.json's defaults)" })"
 Write-Host "mods.txt: $(($lines | Where-Object { $_ -match '^\s*[\w-]+\s*:\s*1' }) -join ', ')"

@@ -2,7 +2,7 @@
 -- revives), the whole path from core's HUD events to the restore or clear, and the Mark all / Clear all wiring (panel and
 -- button arguments, the Journal watcher's order and weak handle, presses with and without an open map), with the real
 -- revive.lua, waypoints.lua, mapbuttons.lua and game.lua over a fake core (connect, log, ui.hud.watch, ui.panel,
--- ui.button, ui.journal, ref/deref/free, clock) and a fake UE4SS world.
+-- ui.button, ui.journal, ref/deref/free, clock, settings) and a fake UE4SS world.
 -- Run from the repo root:  texlua test/unit/main_test.lua
 local ROOT = (arg and arg[0] or ""):match("^(.*)[/\\]test[/\\]unit[/\\][^/\\]+$") or "."
 package.path = ROOT .. "/test/unit/?.lua;" .. package.path
@@ -10,8 +10,11 @@ local F = require("fakeue")
 local H = F.harness("main_test")
 local ok, eq = H.ok, H.eq
 local MAIN = ROOT .. "/Scripts/main.lua"
-local realLoadfile, realLoad = loadfile, load
-local W, S -- the fake world; S.settings is the text of settings.lua (false: missing)
+local realLoadfile, realOpen = loadfile, io.open
+-- The fake world; S.settings describes the stored values in the old settings.lua form, so the tests read as before:
+-- core.settings.get("onRevive") answers its onRevive = "<word>" (false: get raises, as when core can't answer), and its
+-- text is also Scripts/dev.lua (debug = true turns DEBUG on; the mod reads it as text, never runs it).
+local W, S
 
 local function newLog(tag)
     local L = { debugEnabled = false }
@@ -35,21 +38,37 @@ local function boot(opts)
     if opts.client ~= false then
         package.preload["nucleus.client"] = function() return { connect = function(o) S.connects[#S.connects + 1] = o end } end
     end
-    loadfile = function(path, mode, env)
-        if path:match("[/\\]settings%.lua$") then
-            if S.settings == false then return nil, "cannot open " .. path end
-            return realLoad(S.settings, "=settings.lua", "t", env)
+    loadfile = function(path, ...)
+        assert(not path:match("[/\\]dev%.lua$") and not path:match("[/\\]settings%.lua$"), "a settings or dev file must never be run")
+        return realLoadfile(path, ...)
+    end
+    io.open = function(path, mode)
+        if path:match("[/\\]dev%.lua$") then
+            if type(S.settings) ~= "string" then return nil, "cannot open " .. path end
+            local text = S.settings
+            return { read = function() local t = text; text = nil; return t end, close = function() end }
         end
-        return realLoadfile(path, mode, env)
+        return realOpen(path, mode)
     end
     local chunk = assert(realLoadfile(MAIN))
     chunk()
+    io.open = realOpen
     -- game.lua uses the globals F.install put in place (its default environment is _G)
 end
 
 local function newCore(o)
     o = o or {}
-    local core = { name = "Nucleus", version = "0.6.0", log = newLog("Waypoints"), watchers = {}, jwatchers = {}, seq = {}, panels = {}, buttons = {}, overlapCalls = {} }
+    local core = { name = "Nucleus", version = "0.9.0", log = newLog("Waypoints"), watchers = {}, jwatchers = {}, seq = {}, panels = {}, buttons = {}, overlapCalls = {} }
+    -- core.settings (Nucleus 0.9.0): get("onRevive") reads the stored value now (S.settings, see above); gets counted.
+    core.settingsGets = 0
+    if o.settings ~= false then
+        core.settings = { get = function(k)
+            core.settingsGets = core.settingsGets + 1
+            assert(k == "onRevive", "unexpected key " .. tostring(k))
+            if S.settings == false then error("nucleus.settings.get: call-failed channel class not loaded", 0) end
+            return S.settings:match('onRevive%s*=%s*"([^"]*)"')
+        end }
+    end
     if o.hud ~= false then
         core.ui = { hud = { watch = function(fn) core.watchers[#core.watchers + 1] = fn return #core.watchers end } }
     end
@@ -146,9 +165,9 @@ do
     boot()
     eq(#S.connects, 1, "connect called once")
     local c = S.connects[1]
-    ok(c.mod == "Waypoints" and c.need == ">=0.6.0", "connect{ mod = 'Waypoints', need = '>=0.6.0' }", tostring(c.mod) .. " " .. tostring(c.need))
+    ok(c.mod == "Waypoints" and c.need == ">=0.9.0", "connect{ mod = 'Waypoints', need = '>=0.9.0' } (core.settings)", tostring(c.mod) .. " " .. tostring(c.need))
     eq(#W.printed, 0, "nothing printed during main.lua")
-    c.onFail("Nucleus 0.5.0 is older than Waypoints needs (>=0.6.0). Update Nucleus.")
+    c.onFail("Nucleus 0.5.0 is older than Waypoints needs (>=0.9.0). Update Nucleus.")
     eq(#W.printed, 0, "onFail adds no line (connect logged the cause)")
 end
 do -- core without HUD events: one ERROR, nothing registered.
@@ -309,7 +328,7 @@ do -- Bad settings: one WARN after connect, restore used.
     eq(count("WARN onRevive must be"), 1, "bad settings: still one WARN after the revive re-read it")
     boot{ settings = false }
     ready(newCore())
-    eq(count("WARN settings.lua could not be read"), 1, "missing settings: one WARN")
+    eq(count("WARN onRevive could not be read from Nucleus's settings %(nucleus%.settings%.get: call%-failed"), 1, "core can't answer: one WARN")
     boot{ settings = 'return { onRevive = "restore", debug = true }' }
     local c2 = newCore()
     ready(c2)

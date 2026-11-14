@@ -10,7 +10,7 @@
 #>
 
 # The Scripts/ files a deploy installs and a release ships under ue4ss/Mods/<name>/Scripts/ (deploy.ps1 and
-# build.ps1 both use this list; settings.lua is generated).
+# build.ps1 both use this list). No settings file ships: Nucleus keeps the values in Mods/<name>/settings.json.
 $ModScripts = 'main.lua', 'revive.lua', 'waypoints.lua', 'mapbuttons.lua', 'game.lua', 'panelfit.lua'
 
 # ConvertTo-Semver '0.2.0' -> @{ Major = 0; Minor = 2; Patch = 0 }, or $null when the text isn't plain semver
@@ -97,43 +97,51 @@ function Get-ModsTxtState {
     return 'absent'
 }
 
-# ConvertTo-SettingsLua -Manifest <mod.json object> [-Override @{ name = value }] [-DebugLog] [-Profile] -> the text of
-# Scripts/settings.lua: "return { <name> = <value>, ... }" from each setting's default, overridden values checked
-# against the setting's type: int (min..max) or enum (one of "values", each a plain word, written as a Lua string).
-# Any other type throws.
-function ConvertTo-SettingsLua {
-    param([Parameter(Mandatory)] $Manifest, [hashtable] $Override = @{}, [switch] $DebugLog, [switch] $Profile)
+# ConvertTo-SettingsJson -Manifest <mod.json object> -Override @{ name = value } -> the text of Mods/<name>/settings.json
+# (the values file Nucleus's settings service keeps, Nucleus 0.9.0): a flat JSON object of the overridden values only,
+# in the order mod.json declares them, each checked against its declaration: int (an integer from min to max) or enum
+# (one of "values"). $null when there is nothing to override (deploy.ps1 then leaves any existing file alone). An
+# undeclared name, another type or a bad value throws.
+function ConvertTo-SettingsJson {
+    param([Parameter(Mandatory)] $Manifest, [hashtable] $Override = @{})
+    if (-not $Override.Count) { return $null }
+    $declared = [ordered]@{}
+    if ($Manifest.settings) { foreach ($p in $Manifest.settings.PSObject.Properties) { $declared[$p.Name] = $p.Value } }
+    foreach ($k in $Override.Keys) { if (-not $declared.Contains($k)) { throw "setting '$k' is not declared in mod.json" } }
     $parts = @()
-    $declared = @{}
-    if ($Manifest.settings) {
-        foreach ($p in $Manifest.settings.PSObject.Properties) {
-            $name, $s = $p.Name, $p.Value
-            if ($name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') { throw "setting name '$name' is not a Lua identifier" }
-            $declared[$name] = $true
-            $v = if ($Override.ContainsKey($name)) { $Override[$name] } else { $s.default }
-            switch ($s.type) {
-                'int' {
-                    if (-not ($v -is [int] -or $v -is [long]) -or $v -lt $s.min -or $v -gt $s.max) {
-                        throw "setting '$name' = '$v' is not an integer from $($s.min) to $($s.max)"
-                    }
-                    $parts += "$name = $v"
+    foreach ($name in $declared.Keys) {
+        if (-not $Override.ContainsKey($name)) { continue }
+        $s, $v = $declared[$name], $Override[$name]
+        switch ($s.type) {
+            'int' {
+                if (-not ($v -is [int] -or $v -is [long]) -or $v -lt $s.min -or $v -gt $s.max) {
+                    throw "setting '$name' = '$v' is not an integer from $($s.min) to $($s.max)"
                 }
-                'enum' {
-                    $values = @($s.values)
-                    if (-not $values.Count) { throw "setting '$name': an enum needs a non-empty 'values' list" }
-                    foreach ($x in $values) { if ($x -isnot [string] -or $x -notmatch '^[A-Za-z][A-Za-z0-9_-]*$') { throw "setting '$name': enum value '$x' is not a plain word" } }
-                    # -ccontains: enum values are case-sensitive, as the mod compares them.
-                    if ($v -isnot [string] -or -not ($values -ccontains $v)) { throw "setting '$name' = '$v' is not one of $($values -join ', ')" }
-                    $parts += "$name = `"$v`""
-                }
-                default { throw "setting '$name': type '$($s.type)' is not supported (int, enum)" }
+                $parts += ('"{0}":{1}' -f $name, $v)
             }
+            'enum' {
+                $values = @($s.values)
+                if (-not $values.Count) { throw "setting '$name': an enum needs a non-empty 'values' list" }
+                foreach ($x in $values) { if ($x -isnot [string] -or $x -notmatch '^[A-Za-z][A-Za-z0-9_-]*$') { throw "setting '$name': enum value '$x' is not a plain word" } }
+                # -ccontains: enum values are case-sensitive, as Nucleus compares them.
+                if ($v -isnot [string] -or -not ($values -ccontains $v)) { throw "setting '$name' = '$v' is not one of $($values -join ', ')" }
+                $parts += ('"{0}":"{1}"' -f $name, $v)
+            }
+            default { throw "setting '$name': type '$($s.type)' is not supported here (int, enum)" }
         }
     }
-    foreach ($k in $Override.Keys) { if (-not $declared[$k]) { throw "setting '$k' is not declared in mod.json" } }
+    return '{' + ($parts -join ',') + '}'
+}
+
+# ConvertTo-DevLua [-DebugLog] [-Profile] -> the text of Scripts/dev.lua (test-only flags; deploy.ps1 -Test writes it,
+# the mod reads it as text and never runs it), or $null when neither flag is on.
+function ConvertTo-DevLua {
+    param([switch] $DebugLog, [switch] $Profile)
+    $parts = @()
     if ($DebugLog) { $parts += 'debug = true' }
     if ($Profile) { $parts += 'profile = true' }
-    return "-- Generated by deploy.ps1 from mod.json; do not edit (redeploy instead).`nreturn { $($parts -join ', ') }`n"
+    if (-not $parts) { return $null }
+    return "-- Written by deploy.ps1 -Test (test only; never shipped). Read as text by main.lua, never run.`nreturn { $($parts -join ', ') }`n"
 }
 
 # Read-ModsTxt <path> -> @{ Lines; Newline; Trailing; Bom }: the lines plus how the file ends them, so

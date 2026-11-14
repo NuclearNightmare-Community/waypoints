@@ -3,14 +3,15 @@
 -- buttons on the Journal map, Mark all and Clear all, put up or take down every flag's waypoint at once.
 -- Runs on Nucleus (core) through the dependent bootstrap (core's api-contract.md) and uses only core's public API:
 -- connect, core.log, core.ui.hud.watch (HUD events), core.ui.panel / core.ui.button / core.ui.journal (the buttons on
--- the map page and the map's open and close events), core.ref/deref/free (weak handles), core.clock.micros.
+-- the map page and the map's open and close events), core.ref/deref/free (weak handles), core.clock.micros, and
+-- core.settings (the onRevive setting, Nucleus 0.9.0).
 -- Local only (scope client): the waypoint actors are local and unreplicated; no RPC, no chat, no replicated actor, and
 -- nothing read from another player. Holds no UObject between callbacks (AGENTS.md): revive.lua sees plain facts, the
 -- deferred action re-finds the new pawn through a weak handle, and the open Journal crosses from its open event to a
 -- button press only as a weak handle. No per-tick work: it acts on HUD events, map opens and button presses only.
 -- Story 5: the panel sits on the left page directly under the map square (core 0.6.0's Journal regions, PANEL_PLACE).
 -- With debug on (deploy.ps1 -Test) each map open measures it once with core.ui.debug.overlaps (PANELFIT lines).
-local CORE, NEED, ME = "Nucleus", ">=0.6.0", "Waypoints"
+local CORE, NEED, ME = "Nucleus", ">=0.9.0", "Waypoints"
 local DELAY_MS = 500 -- after the revive's HUD event, so the game has finished possessing the new pawn
 local SNAPSHOT_MS = 50 -- the snapshot at the death runs this much later, outside core's HUD tick (it costs about 2 ms)
 -- The Mark all / Clear all panel: on the left page, centred directly under the map square (core 0.6.0's measured `map`
@@ -38,23 +39,33 @@ local game = require("game")
 local panelfit = require("panelfit")
 
 -- ---------------------------------------------------------------- settings
--- deploy.ps1 generates Scripts/settings.lua from mod.json (onRevive: restore | clear). Until core's settings service
--- exists the mod reads it there; it is read again at every revive, so a changed onRevive takes effect at the next one
--- (changeable "anytime"). Problems are only remembered here and logged once connected (one [Waypoints] line without core).
+-- onRevive (restore | clear) comes from Nucleus's settings service (core.settings, Nucleus 0.9.0): declared in
+-- mod.json, its value kept by Nucleus in Mods/Waypoints/settings.json (deploy.ps1 -OnRevive writes it; later the Mod
+-- Manager). It is read again at every revive, so a change takes effect at the next one (changeable "anytime").
 local VALUES = { restore = true, clear = true }
-local function loadSettings()
-    local s = { onRevive = "restore", debug = false }
-    local chunk, err = loadfile(scriptDir .. "/settings.lua", "t", {})
-    if not chunk then return s, "settings.lua could not be read (" .. tostring(err) .. "); run deploy.ps1. Using onRevive = restore" end
-    local okS, t = pcall(chunk)
-    if not okS or type(t) ~= "table" then return s, "settings.lua did not return a table (" .. tostring(t) .. "); using onRevive = restore" end
-    local problem
-    if VALUES[t.onRevive] then s.onRevive = t.onRevive
-    elseif t.onRevive ~= nil then problem = "onRevive must be restore or clear, got " .. tostring(t.onRevive) .. "; using restore" end
-    s.debug = t.debug == true -- DEBUG lines: deploy.ps1 -Test
-    return s, problem
+local ON_REVIVE_DEFAULT = "restore"
+-- onRevive(core) -> value, problem: the stored value, or the default and why (logged once per distinct problem).
+local function readOnRevive(core)
+    local cs = type(core) == "table" and type(core.settings) == "table" and core.settings or nil
+    if not cs then return ON_REVIVE_DEFAULT, CORE .. "'s settings (core.settings) are not available; using onRevive = restore" end
+    local okS, v = pcall(cs.get, "onRevive")
+    if not okS then return ON_REVIVE_DEFAULT, "onRevive could not be read from " .. CORE .. "'s settings (" .. tostring(v) .. "); using restore" end
+    if not VALUES[v] then return ON_REVIVE_DEFAULT, "onRevive must be restore or clear, got " .. tostring(v) .. "; using restore" end
+    return v
 end
-local settings, settingsProblem = loadSettings()
+-- Test-only flags from Scripts/dev.lua, which only deploy.ps1 -Test writes (git-ignored, never shipped). Read as text,
+-- never run: "debug = true" turns on the DEBUG lines.
+local function devFlags()
+    local d = { debug = false }
+    local f = io.open(scriptDir .. "/dev.lua", "r")
+    if not f then return d end
+    local okR, text = pcall(f.read, f, 4096)
+    pcall(f.close, f)
+    text = okR and type(text) == "string" and text or ""
+    d.debug = text:find("debug%s*=%s*true") ~= nil
+    return d
+end
+local settings = devFlags()
 
 -- ---------------------------------------------------------------- Mark all and Clear all (story 3)
 -- A panel under the map square (PANEL_PLACE) holding the two buttons, created before the Journal watcher so that on
@@ -155,7 +166,11 @@ local function start(core)
     log.debugEnabled = settings.debug
     local said = {}
     local function sayOnce(p) if p and not said[p] then said[p] = true; log.warn("%s", p) end end
-    sayOnce(settingsProblem)
+    local function onRevive()
+        local v, problem = readOnRevive(core)
+        sayOnce(problem)
+        return v
+    end
     local hud = type(core.ui) == "table" and type(core.ui.hud) == "table" and core.ui.hud or nil
     if not (hud and type(hud.watch) == "function") then
         log.error("%s's HUD events (core.ui.hud.watch) are not available. %s will not run.", CORE, ME)
@@ -168,11 +183,7 @@ local function start(core)
 
     -- Runs a revive's action on the new pawn: "revive" means the onRevive setting (read now), "restore" always restores.
     local function run(action, pawn, snapshot)
-        if action == "revive" then
-            local s, problem = loadSettings()
-            sayOnce(problem)
-            action = s.onRevive
-        end
+        if action == "revive" then action = onRevive() end
         local world = game.worldOf(pawn)
         if action == "clear" then
             local r = waypoints.clear(game, pawn, world, log)
@@ -246,7 +257,7 @@ local function start(core)
             log.debug("PAWN %s %s", d.kind, d.pawn)
         elseif d.kind == "revive" then
             local l, s = waypoints.counts(d.snapshot)
-            log.info("REVIVE pawn=%s was=%s snapshot=%d onRevive=%s", d.pawn, d.was, l + s, (loadSettings()).onRevive)
+            log.info("REVIVE pawn=%s was=%s snapshot=%d onRevive=%s", d.pawn, d.was, l + s, onRevive())
             schedule(d.action, f.pawn, d.pawn, d.snapshot)
         elseif d.kind == "rebound" then
             log.info("REBOUND pawn=%s was=%s (a new pawn without a HUD loss: restore only, never clear)", d.pawn, d.was)
@@ -265,7 +276,7 @@ local function start(core)
     -- A map change destroys every waypoint actor with the old world: forget the old pawn and snapshot.
     pcall(RegisterLoadMapPostHook, function() R:loadMap() end)
     local buttons = setupButtons(core, log)
-    log.info("READY onRevive=%s buttons=%s", settings.onRevive, buttons and "yes" or "no")
+    log.info("READY onRevive=%s buttons=%s", onRevive(), buttons and "yes" or "no")
 end
 
 client.connect{

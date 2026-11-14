@@ -94,6 +94,9 @@ $reviveChecks = @(
     "#2|\[$C\] REVIVE pawn="
     "\[$C\] REVIVE pawn=.* snapshot=3 onRevive=restore\s*$"
     "\[$C\] REVIVE pawn=.* onRevive=clear\s*$"
+    # 0.3.0: the driver sets onRevive=clear through Nucleus's settings service (settings-set), between the two revives.
+    "#1|\[$D\] SETTINGS onRevive=clear via settings-set reply=ok:"
+    "\[$D\] OK SETTINGS onRevive=clear accepted by $K's settings service"
     "\[$C\] RESTORED n=3 \(from actors 3, from the snapshot 0, failed 0, old destroyed 3\)"
     "\[$C\] RESTORE satellite 'Satellite' respawned bReplicates=false"
     "\[$C\] CLEARED n=3 \(failed 0\)"

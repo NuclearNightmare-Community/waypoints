@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Unit tests for deploy-lib.ps1 (version needs, mods.txt editing, settings.lua) and deploy.ps1 end to end against a
+  Unit tests for deploy-lib.ps1 (version needs, mods.txt editing, settings.json, dev.lua) and deploy.ps1 end to end against a
   fake game instance in a temp folder (never a real copy: no game, no UE4SS, only the files deploy.ps1 looks at).
 .EXAMPLE
   pwsh -NoProfile -File test/unit/deploy_test.ps1
@@ -91,34 +91,34 @@ Eq (Get-ModsTxtState -Lines @('Nucleus : 0') -Name 'Nucleus') 'disabled' 'state:
 Eq (Get-ModsTxtState -Lines $stock -Name 'Nucleus') 'absent' 'state: absent'
 Eq (Get-ModsTxtState -Lines @('NucleusX : 1') -Name 'Nucleus') 'absent' 'state: a longer name is not Nucleus'
 
-# ---------------------------------------------------------------- settings.lua
+# ---------------------------------------------------------------- settings.json and dev.lua (Nucleus 0.9.0's values file)
 $m = Get-Content (Join-Path $repo 'mod.json') -Raw | ConvertFrom-Json
-$text = ConvertTo-SettingsLua -Manifest $m
-Ok ($text -match "(?m)^return \{ onRevive = `"restore`" \}$") 'settings: default onRevive = "restore"' $text
-Ok ((ConvertTo-SettingsLua -Manifest $m -Override @{ onRevive = 'clear' }) -match 'return \{ onRevive = "clear" \}') 'settings: override clear'
-Ok ((ConvertTo-SettingsLua -Manifest $m -DebugLog) -match 'return \{ onRevive = "restore", debug = true \}') 'settings: -DebugLog adds debug = true'
-Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ onRevive = 'wipe' } } 'is not one of restore, clear' 'settings: an unknown value refused'
-Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ onRevive = 'Clear' } } 'is not one of' 'settings: enum values are case-sensitive'
-Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ onRevive = 1 } } 'is not one of' 'settings: a number refused'
-Throws { ConvertTo-SettingsLua -Manifest $m -Override @{ colour = 1 } } 'not declared' 'settings: undeclared refused'
+Eq (ConvertTo-SettingsJson -Manifest $m) $null 'settings: nothing to override -> no file'
+Eq (ConvertTo-SettingsJson -Manifest $m -Override @{ onRevive = 'clear' }) '{"onRevive":"clear"}' 'settings: override clear'
+Eq (ConvertTo-SettingsJson -Manifest $m -Override @{ onRevive = 'restore' }) '{"onRevive":"restore"}' 'settings: override restore'
+Throws { ConvertTo-SettingsJson -Manifest $m -Override @{ onRevive = 'wipe' } } 'is not one of restore, clear' 'settings: an unknown value refused'
+Throws { ConvertTo-SettingsJson -Manifest $m -Override @{ onRevive = 'Clear' } } 'is not one of' 'settings: enum values are case-sensitive'
+Throws { ConvertTo-SettingsJson -Manifest $m -Override @{ onRevive = 1 } } 'is not one of' 'settings: a number refused'
+Throws { ConvertTo-SettingsJson -Manifest $m -Override @{ colour = 1 } } 'not declared' 'settings: undeclared refused'
 # enum and int validation on synthetic manifests
 $mk = { param($json) $json | ConvertFrom-Json }
-Throws { ConvertTo-SettingsLua -Manifest (& $mk '{ "settings": { "x": { "type": "enum", "values": [], "default": "a" } } }') } 'non-empty' 'settings: an enum without values throws'
-Throws { ConvertTo-SettingsLua -Manifest (& $mk '{ "settings": { "x": { "type": "enum", "values": ["a\"b"], "default": "a\"b" } } }') } 'not a plain word' 'settings: an enum value that would break the Lua string throws'
-Throws { ConvertTo-SettingsLua -Manifest (& $mk '{ "settings": { "x": { "type": "float", "default": 1 } } }') } 'not supported' 'settings: unknown type throws'
-Ok ((ConvertTo-SettingsLua -Manifest (& $mk '{ "settings": { "n": { "type": "int", "default": 3, "min": 1, "max": 5 } } }')) -match 'return \{ n = 3 \}') 'settings: int still works'
-Throws { ConvertTo-SettingsLua -Manifest (& $mk '{ "settings": { "n": { "type": "int", "default": 9, "min": 1, "max": 5 } } }') } 'not an integer from 1 to 5' 'settings: int bounds'
-# The generated file is valid Lua that main.lua's loader accepts: checked by main_test.lua with the same text.
+Throws { ConvertTo-SettingsJson -Manifest (& $mk '{ "settings": { "x": { "type": "enum", "values": [], "default": "a" } } }') -Override @{ x = 'a' } } 'non-empty' 'settings: an enum without values throws'
+Throws { ConvertTo-SettingsJson -Manifest (& $mk '{ "settings": { "x": { "type": "enum", "values": ["a\"b"], "default": "a\"b" } } }') -Override @{ x = 'a"b' } } 'not a plain word' 'settings: an enum value that would break the JSON string throws'
+Throws { ConvertTo-SettingsJson -Manifest (& $mk '{ "settings": { "x": { "type": "float", "default": 1 } } }') -Override @{ x = 1 } } 'not supported' 'settings: unknown type throws'
+Eq (ConvertTo-SettingsJson -Manifest (& $mk '{ "settings": { "n": { "type": "int", "default": 3, "min": 1, "max": 5 } } }') -Override @{ n = 4 }) '{"n":4}' 'settings: int works'
+Throws { ConvertTo-SettingsJson -Manifest (& $mk '{ "settings": { "n": { "type": "int", "default": 3, "min": 1, "max": 5 } } }') -Override @{ n = 9 } } 'not an integer from 1 to 5' 'settings: int bounds'
+Eq (ConvertTo-DevLua) $null 'dev.lua: no flags -> no file'
+Ok ((ConvertTo-DevLua -DebugLog) -match '(?m)^return \{ debug = true \}$') 'dev.lua: -DebugLog'
 Eq $m.settings.onRevive.label 'After a revive, your map waypoints' 'mod.json: the setting has its label'
 Eq $m.settings.onRevive.changeable 'anytime' 'mod.json: changeable anytime'
 Eq (@($m.settings.onRevive.values) -join ',') 'restore,clear' 'mod.json: values restore, clear'
 Eq $m.settings.onRevive.default 'restore' 'mod.json: default restore'
-Ok ($m.id -eq 'waypoints' -and $m.name -eq 'Waypoints' -and $m.version -eq '0.2.0' -and $m.scope -eq 'client') 'mod.json: id, name, version 0.2.0, scope'
-Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '>=0.6.0') 'mod.json: dependsOn nucleus >=0.6.0 (a minimum, core story 18; the Journal regions it is verified on)'
+Ok ($m.id -eq 'waypoints' -and $m.name -eq 'Waypoints' -and $m.version -eq '0.3.0' -and $m.scope -eq 'client') 'mod.json: id, name, version 0.3.0, scope'
+Ok ($m.dependsOn[0].id -eq 'nucleus' -and $m.dependsOn[0].version -eq '>=0.9.0') 'mod.json: dependsOn nucleus >=0.9.0 (a minimum, core story 18; core.settings)'
 Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.2.3' -and $m.game.build -eq '26601774') 'mod.json: ue4ss and game build (V8.2.3 / 26601774)'
 # The runtime need in main.lua equals dependsOn's minimum.
 $mainLua = Get-Content (Join-Path $repo 'Scripts\main.lua') -Raw
-Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", ">=0.6.0", "Waypoints"') 'main.lua: need = dependsOn (>=0.6.0)'
+Ok ($mainLua -match 'local CORE, NEED, ME = "Nucleus", ">=0.9.0", "Waypoints"') 'main.lua: need = dependsOn (>=0.9.0)'
 
 # ---------------------------------------------------------------- mods.txt bytes
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("waypoints-deploy-test-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -173,22 +173,22 @@ try {
     [IO.File]::WriteAllText($modsTxt, $coreTxt)
     Set-Core '0.1.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.1\.0 is installed, but Waypoints needs >=0\.6\.0; update Nucleus\.') 'deploy: core 0.1.0 -> refused, naming both versions' $d.Out
-    Set-Core '0.5.0'
+    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.1\.0 is installed, but Waypoints needs >=0\.9\.0; update Nucleus\.') 'deploy: core 0.1.0 -> refused, naming both versions' $d.Out
+    Set-Core '0.8.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.5\.0 is installed, but Waypoints needs >=0\.6\.0; update Nucleus\.') 'deploy: core 0.5.0 (no Journal regions) -> refused, naming >=0.6.0' $d.Out
-    Ok (($d.Out.Trim() -split "`r?`n").Count -eq 1) 'deploy: the core 0.5.0 refusal is one line' $d.Out
-    Set-Core '0.7.0'
+    Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus 0\.8\.0 is installed, but Waypoints needs >=0\.9\.0; update Nucleus\.') 'deploy: core 0.8.0 (no settings service) -> refused, naming >=0.9.0' $d.Out
+    Ok (($d.Out.Trim() -split "`r?`n").Count -eq 1) 'deploy: the core 0.8.0 refusal is one line' $d.Out
+    Set-Core '0.10.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 0) 'deploy: core 0.7.0 (a newer minor) -> installed' $d.Out
-    Set-Core '0.6.0' '0.1.0'
+    Ok ($d.Code -eq 0) 'deploy: core 0.10.0 (a newer minor) -> installed' $d.Out
+    Set-Core '0.9.0' '0.1.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 0) 'deploy: core 0.6.0, floor 0.1.0 -> installed' $d.Out
-    Set-Core '0.8.0' '0.7.0'
+    Ok ($d.Code -eq 0) 'deploy: core 0.9.0, floor 0.1.0 -> installed' $d.Out
+    Set-Core '0.11.0' '0.10.0'
     $d = Deploy @()
-    Ok ($d.Code -eq 1 -and $d.Out -match '^Waypoints not deployed: Waypoints was made for Nucleus >=0\.6\.0, which this Nucleus 0\.8\.0 no longer supports \(oldest: 0\.7\.0\); update Waypoints\.') 'deploy: floor 0.7.0 above the need -> refused, naming the mod' $d.Out
+    Ok ($d.Code -eq 1 -and $d.Out -match '^Waypoints not deployed: Waypoints was made for Nucleus >=0\.9\.0, which this Nucleus 0\.11\.0 no longer supports \(oldest: 0\.10\.0\); update Waypoints\.') 'deploy: floor 0.10.0 above the need -> refused, naming the mod' $d.Out
     Ok (($d.Out.Trim() -split "`r?`n").Count -eq 1) 'deploy: the floor refusal is one line' $d.Out
-    Set-Core '0.6.0' 'soon'
+    Set-Core '0.9.0' 'soon'
     $d = Deploy @()
     Ok ($d.Code -eq 0) 'deploy: a floor that is not X.Y.Z is no floor (as core)' $d.Out
     Deploy @('-Remove') | Out-Null
@@ -198,35 +198,41 @@ try {
     Ok ($d.Code -eq 1 -and $d.Out -match "is not Nucleus's manifest") 'deploy: unreadable core mod.json -> refused' $d.Out
 
     # Core disabled.
-    Set-Core '0.6.0'
+    Set-Core '0.9.0'
     [IO.File]::WriteAllText($modsTxt, "Nucleus : 0`r`n" + $stockTxt)
     $d = Deploy @()
     Ok ($d.Code -eq 1 -and $d.Out -match 'Nucleus is installed but disabled in mods\.txt') 'deploy: core disabled -> refused' $d.Out
 
-    # Good core: installed below Nucleus, above Keybinds; settings.lua generated; no core files bundled.
+    # Good core: installed below Nucleus, above Keybinds; no settings file without -OnRevive; no core files bundled.
     [IO.File]::WriteAllText($modsTxt, "Waypoints : 1`r`n" + $coreTxt) # a Waypoints line above Nucleus must move below it
-    Set-Core '0.6.1'
+    Set-Core '0.9.1'
     $d = Deploy @()
-    Ok ($d.Code -eq 0) 'deploy: core 0.6.1 -> installed' $d.Out
+    Ok ($d.Code -eq 0) 'deploy: core 0.9.1 -> installed' $d.Out
     Eq (Txt) ("Nucleus : 1`r`nWaypoints : 1`r`n" + $stockTxt) 'deploy: Waypoints below Nucleus, above Keybinds'
     $files = @(Get-ChildItem (Join-Path $mods 'Waypoints') -Recurse -File | ForEach-Object { $_.FullName.Substring((Join-Path $mods 'Waypoints').Length + 1) } | Sort-Object)
-    Eq ($files -join ',') 'mod.json,Scripts\game.lua,Scripts\main.lua,Scripts\mapbuttons.lua,Scripts\panelfit.lua,Scripts\revive.lua,Scripts\settings.lua,Scripts\waypoints.lua' 'deploy: exactly the Waypoints files'
-    Ok ((Get-Content (Join-Path $mods 'Waypoints\Scripts\settings.lua') -Raw) -match 'return \{ onRevive = "restore" \}') 'deploy: settings.lua from mod.json defaults'
+    Eq ($files -join ',') 'mod.json,Scripts\game.lua,Scripts\main.lua,Scripts\mapbuttons.lua,Scripts\panelfit.lua,Scripts\revive.lua,Scripts\waypoints.lua' 'deploy: exactly the Waypoints files (no settings file, no dev.lua)'
     Ok (-not (Test-Path (Join-Path $mods 'WaypointsDriver'))) 'deploy: no driver without -Test'
 
-    # -OnRevive clear.
+    # -OnRevive clear writes Nucleus's values file; a redeploy without it keeps the file byte for byte.
+    $values = Join-Path $mods 'Waypoints\settings.json'
     $d = Deploy @('-OnRevive', 'clear')
-    Ok ((Get-Content (Join-Path $mods 'Waypoints\Scripts\settings.lua') -Raw) -match 'return \{ onRevive = "clear" \}') 'deploy: -OnRevive clear' $d.Out
+    Eq ([IO.File]::ReadAllText($values)) '{"onRevive":"clear"}' 'deploy: -OnRevive clear writes settings.json'
     Eq (Txt) ("Nucleus : 1`r`nWaypoints : 1`r`n" + $stockTxt) 'deploy: redeploy keeps one Waypoints line'
+    [IO.File]::WriteAllText($values, '{}')   # as Nucleus would have written it in game
+    $d = Deploy @()
+    Eq ([IO.File]::ReadAllText($values)) '{}' 'deploy: a redeploy keeps the existing settings.json' $d.Out
+    Ok ($d.Out -match 'settings\.json: kept as it was') 'deploy: says it kept it' $d.Out
     $d = Deploy @('-OnRevive', 'wipe')
     Ok ($d.Out -match 'does not belong to the set') 'deploy: -OnRevive wipe refused by the parameter' $d.Out
 
-    # -Test: driver between Nucleus and Waypoints, scenario written, debug on.
+    # -Test: driver between Nucleus and Waypoints, scenario written, dev.lua debug on, onRevive reset to restore.
+    [IO.File]::WriteAllText($values, '{"onRevive":"clear"}')
     $d = Deploy @('-Test', '-Scenario', 'probe')
     Ok ($d.Code -eq 0) 'deploy -Test: installed' $d.Out
     Eq (Txt) ("Nucleus : 1`r`nWaypointsDriver : 1`r`nWaypoints : 1`r`n" + $stockTxt) 'deploy -Test: Nucleus, WaypointsDriver, Waypoints, then the rest'
     Eq ([IO.File]::ReadAllText((Join-Path $mods 'WaypointsDriver\Scripts\scenario.txt'))) 'probe' 'deploy -Test: scenario.txt'
-    Ok ((Get-Content (Join-Path $mods 'Waypoints\Scripts\settings.lua') -Raw) -match 'return \{ onRevive = "restore", debug = true \}') 'deploy -Test: debug on'
+    Ok ((Get-Content (Join-Path $mods 'Waypoints\Scripts\dev.lua') -Raw) -match 'return \{ debug = true \}') 'deploy -Test: dev.lua debug on'
+    Eq ([IO.File]::ReadAllText($values)) '{"onRevive":"restore"}' 'deploy -Test: settings.json reset to restore (no earlier value inherited)'
     Ok (Test-Path (Join-Path $mods 'WaypointsDriver\Scripts\main.lua')) 'deploy -Test: the driver installed'
     $d = Deploy @('-Test', '-Scenario', 'buttons')
     Ok ($d.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $mods 'WaypointsDriver\Scripts\scenario.txt')) -eq 'buttons') 'deploy -Test: buttons' $d.Out
@@ -256,6 +262,7 @@ try {
     Ok ($d.Code -eq 0 -and [IO.File]::ReadAllText((Join-Path $mods 'WaypointsDriver\Scripts\scenario.txt')) -eq 'pair-victim') 'deploy -Test -Staged: pair-victim' $d.Out
     $d = Deploy @()
     Ok (-not (Test-Path (Join-Path $mods 'WaypointsDriver')) -and (Txt) -eq ("Nucleus : 1`r`nWaypoints : 1`r`n" + $stockTxt)) 'deploy without -Test removes the driver'
+    Ok (-not (Test-Path (Join-Path $mods 'Waypoints\Scripts\dev.lua'))) 'deploy without -Test: no dev.lua'
 
     # -Force: installs despite a missing core, above Keybinds.
     Set-Core '0.1.0'
@@ -272,7 +279,7 @@ try {
     Ok ($d.Code -eq 0 -and -not (Test-Path (Join-Path $mods 'Waypoints'))) 'deploy -Remove: no Waypoints files' $d.Out
     Eq (Txt) $stockTxt 'deploy -Remove: mods.txt byte-identical to stock'
     New-Item -ItemType Directory -Force (Join-Path $mods 'Nucleus') | Out-Null
-    Set-Core '0.6.0'
+    Set-Core '0.9.0'
     [IO.File]::WriteAllText($modsTxt, $coreTxt)
     Deploy @('-Test') | Out-Null
     Deploy @('-Remove') | Out-Null

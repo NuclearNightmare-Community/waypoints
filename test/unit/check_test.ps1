@@ -66,6 +66,8 @@ $revive = (Start-Log 'revive') + @(
     (M "LOST pawn=$P1 snapshot n=3 (locations 2, satellite 1)"),
     (M "REVIVE pawn=$P2 was=$P1 snapshot=3 onRevive=restore")) + (Restored) + @((Dr 'SOLO revive1 EOGLock=false ok=true')) + (DriverRestored 'revive1') + @(
     (Dr 'ANSWER journal-same-after-revive=yes'),
+    (Dr 'SETTINGS onRevive=clear via settings-set reply=ok:"key":"onRevive","value":"clear"'),
+    (Dr 'OK SETTINGS onRevive=clear accepted by Nucleus''s settings service'),
     (Dr 'SOLO revive2 EOGLock=true ok=true')) + (DriverDeath 'revive2' $P2) + @(
     (M "LOST pawn=$P2 snapshot n=3 (locations 2, satellite 1)"),
     (M "REVIVE pawn=$P3 was=$P2 snapshot=3 onRevive=clear"),
@@ -75,6 +77,7 @@ $revive = (Start-Log 'revive') + @(
     $endPass)
 Expect $revive 'revive' 0 'revive: passes as written' 'All checks passed'
 Expect $revive 'revive' 0 'revive -Target vm: passes' 'All checks passed' 'vm'
+Expect @($revive | Where-Object { $_ -notmatch 'SETTINGS onRevive=clear via' }) 'revive' 1 'revive: no settings-set reply from the driver -> fails (0.3.0: onRevive set through Nucleus)' 'SETTINGS'
 Expect (Without $revive 'CLEARED n=3') 'revive' 1 'revive: no CLEARED -> fails' 'not: REVIVE'
 Expect (Without $revive 'RESTORED n=3') 'revive' 1 'revive: no RESTORED -> fails' 'RESTORED n=3'
 Expect (($revive -replace "satellite 'Satellite' respawned bReplicates=false", "satellite 'Satellite' respawned bReplicates=true")) 'revive' 1 'revive: a replicated waypoint -> fails' 'bReplicates=true'
@@ -234,10 +237,10 @@ $noCore = @((U "Starting Lua mod 'WaypointsDriver'"), (Dr 'SCENARIO no-core'), (
 Expect $noCore 'no-core' 0 'no-core: passes as written' 'All checks passed'
 Expect ($noCore + @(M 'READY onRevive=restore')) 'no-core' 1 'no-core: a second Waypoints line -> fails' '#1'
 $oldCore = @((U "Starting Lua mod 'Nucleus'"), (Dr 'SCENARIO old-core'), (Dr 'OLDCORE published nucleus.version=0.1.0 (from Nucleus''s installed mod.json)'),
-    (M 'ERROR Nucleus 0.1.0 is older than Waypoints needs (>=0.6.0). Update Nucleus. Waypoints will not run.'),
+    (M 'ERROR Nucleus 0.1.0 is older than Waypoints needs (>=0.9.0). Update Nucleus. Waypoints will not run.'),
     (Dr 'OK NOWAYPOINTS match1 reached the match'), $endPass)
 Expect $oldCore 'old-core' 0 'old-core: passes as written' 'All checks passed'
-Expect ($oldCore -replace 'needs \(>=0\.6\.0\)', 'needs (>=0.5.0)') 'old-core' 1 'old-core: the need must be dependsOn''s version' 'is older than'
+Expect ($oldCore -replace 'needs \(>=0\.9\.0\)', 'needs (>=0.8.0)') 'old-core' 1 'old-core: the need must be dependsOn''s version' 'is older than'
 
 # ---------------------------------------------------------------- pair
 $victim = (Start-Log 'pair-victim') + @(
