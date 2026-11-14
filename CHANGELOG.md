@@ -11,6 +11,7 @@ For players: the "after a revive, your map waypoints" setting is now kept by Nuc
 ### Changed
 
 - `onRevive` comes from Nucleus's settings service (`core.settings.get`), read at every revive. `Scripts/settings.lua` is gone: `deploy.ps1 -OnRevive` writes `Mods/Waypoints/settings.json` instead, a redeploy without it keeps an existing one, and a release ships no settings file.
+- An existing `Scripts/settings.lua` is no longer read: a value chosen there must be set again in `Mods/Waypoints/settings.json` (for example `{"onRevive":"clear"}`; in Notepad, save with "All files" so the name ends in `.json`, not `.json.txt`).
 - The test-only `debug` flag moved to `Scripts/dev.lua`, written only by `deploy.ps1 -Test`, read as text and never run.
 - The test driver switches `onRevive` with a `settings-set` on Nucleus's channel and logs the reply (`revive`, `buttons-revive`).
 - Needs Nucleus `>=0.9.0` (`dependsOn` and `connect`).
