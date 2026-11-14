@@ -15,6 +15,7 @@ For players: the "after a revive, your map waypoints" setting is now kept by Nuc
 - The test-only `debug` flag moved to `Scripts/dev.lua`, written only by `deploy.ps1 -Test`, read as text and never run.
 - The test driver switches `onRevive` with a `settings-set` on Nucleus's channel and logs the reply (`revive`, `buttons-revive`).
 - Needs Nucleus `>=0.9.0` (`dependsOn` and `connect`).
+- The mod id is now `nuclearnightmare-community.waypoints` (was `waypoints`), and `dependsOn` names Nucleus as `nuclearnightmare-community.nucleus` (distribution story 13, `mod-ids.md`): the namespaced ids every released mod takes before the first public release. The folder, `mods.txt` line and `name` are unchanged. `deploy.ps1` finds core's entry by the new id, so a dev copy needs a Nucleus deployed with the new id (Nucleus 0.12.0).
 
 ## [0.2.0] - 2026-11-13
 
