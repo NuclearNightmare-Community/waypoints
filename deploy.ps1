@@ -45,6 +45,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'deploy-lib.ps1')
 
+$CoreId   = 'nuclearnightmare-community.nucleus' # core's mod id (distribution story 13, mod-ids.md)
 $CoreName = 'Nucleus' # core's folder and mods.txt name: the one place this script spells it
 $here     = $PSScriptRoot
 $manifest = Get-Content (Join-Path $here 'mod.json') -Raw | ConvertFrom-Json
@@ -76,8 +77,8 @@ if ($Remove) {
 }
 
 # Core: installed, enabled, and a version Waypoints' dependsOn accepts.
-$dep = @($manifest.dependsOn | Where-Object { $_.id -eq $CoreName.ToLowerInvariant() })[0]
-if (-not $dep) { throw "mod.json has no dependsOn entry for $($CoreName.ToLowerInvariant())" }
+$dep = @($manifest.dependsOn | Where-Object { $_.id -is [string] -and $_.id.ToLowerInvariant() -eq $CoreId })[0]
+if (-not $dep) { throw "mod.json has no dependsOn entry for $CoreId" }
 $coreJson = Join-Path $modsDir "$CoreName\mod.json"
 $problem = $null
 if (-not (Test-Path $coreJson)) {

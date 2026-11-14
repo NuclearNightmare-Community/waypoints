@@ -36,7 +36,7 @@ $CoreName = 'Nucleus'
 $manifest = Get-Content (Join-Path $PSScriptRoot 'mod.json') -Raw | ConvertFrom-Json
 $name = $manifest.name
 $C = [regex]::Escape($name); $D = [regex]::Escape("${name}Driver"); $K = [regex]::Escape($CoreName)
-$needVer = ($manifest.dependsOn | Where-Object id -eq $CoreName.ToLowerInvariant()).version
+$needVer = ($manifest.dependsOn | Where-Object id -eq 'nuclearnightmare-community.nucleus').version
 $NeedRx = [regex]::Escape($needVer)
 if (-not $Log) {
     if (-not $Instance) { Write-Host 'FAIL: pass -Log <file> or -Instance <copy>'; exit 1 }
