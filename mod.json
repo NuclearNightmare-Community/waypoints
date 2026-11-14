@@ -1,11 +1,11 @@
 {
   "id": "waypoints",
   "name": "Waypoints",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "scope": "client",
   "game": { "version": "V8.2.3", "build": "26601774" },
   "ue4ss": "v3.0.1-1181-g83330635",
-  "dependsOn": [ { "id": "nucleus", "version": ">=0.6.0" } ],
+  "dependsOn": [ { "id": "nucleus", "version": ">=0.9.0" } ],
   "settings": {
     "onRevive": { "type": "enum", "values": [ "restore", "clear" ], "default": "restore",
                   "label": "After a revive, your map waypoints", "changeable": "anytime" }

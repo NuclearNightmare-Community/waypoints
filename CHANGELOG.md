@@ -2,6 +2,19 @@
 
 All notable changes to Waypoints are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] - 0.3.0
+
+Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635. Needs Nucleus 0.9.0 or newer (`>=0.9.0`).
+
+For players: the "after a revive, your map waypoints" setting is now kept by Nucleus in `Mods/Waypoints/settings.json`, so a redeploy keeps it, and a change (from the Mod Manager, later) applies at the next revive without a restart.
+
+### Changed
+
+- `onRevive` comes from Nucleus's settings service (`core.settings.get`), read at every revive. `Scripts/settings.lua` is gone: `deploy.ps1 -OnRevive` writes `Mods/Waypoints/settings.json` instead, a redeploy without it keeps an existing one, and a release ships no settings file.
+- The test-only `debug` flag moved to `Scripts/dev.lua`, written only by `deploy.ps1 -Test`, read as text and never run.
+- The test driver switches `onRevive` with a `settings-set` on Nucleus's channel and logs the reply (`revive`, `buttons-revive`).
+- Needs Nucleus `>=0.9.0` (`dependsOn` and `connect`).
+
 ## [0.2.0] - 2026-11-13
 
 First release: a soft release to a few testers, not released publicly. Game: Nuclear Nightmare V8.2.3 (build 26601774). UE4SS: v3.0.1-1181-g83330635. Needs Nucleus 0.6.0 or newer (`>=0.6.0`).

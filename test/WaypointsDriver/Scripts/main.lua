@@ -19,8 +19,9 @@
 --            whole death), then the radio's ReinforceSpecficPlayer(dead body) spawns and possesses a new character as
 --            the computer's reinforcement button does; EOGLock is released after it.
 --            Revive 1 with onRevive=restore: one actor per waypoint, bound to the new pawn, painted, bReplicates false,
---            the flags match; same Journal instance? Then the driver rewrites Waypoints' settings.lua to onRevive=clear
---            (read at every revive) and revive 2: no waypoint, no flag selected.
+--            the flags match; same Journal instance? Then the driver sets onRevive=clear through Nucleus's settings
+--            service (a raw settings-set on core's channel; Waypoints reads it at every revive) and revive 2: no
+--            waypoint, no flag selected.
 --   death:   solo host: waypoints up, then the player dies (one CallDamageEvent(1000), then the game's own death):
 --            spectator, the waypoint actors keep existing, Waypoints does nothing else. Also answers (not a check)
 --            whether the waypoints still paint while spectating.
@@ -588,14 +589,22 @@ local function clearedChecks(phase)
     end)
 end
 
+-- Sets Waypoints' onRevive through Nucleus's settings service, as the Mod Manager will: the driver doesn't connect to
+-- core, so it calls core's channel on the class default object itself (game thread; value is a fixed word, never
+-- player input) and logs core's reply.
 local function setOnRevive(value)
     step("set onRevive=" .. value, function()
-        local path = modsDir .. "\\" .. WAYPOINTS .. "\\Scripts\\settings.lua"
-        local f = io.open(path, "w")
-        if not f then check(false, "SETTINGS could not write %s", path) return end
-        f:write('-- Rewritten by WaypointsDriver (test only).\nreturn { onRevive = "' .. value .. '", debug = true }\n')
-        f:close()
-        say("SETTINGS onRevive=%s written to Waypoints' settings.lua", value)
+        local cdo = StaticFindObject("/Game/Mods/" .. CORE .. "/ModActor.Default__ModActor_C")
+        if not (cdo and cdo:IsValid()) then check(false, "SETTINGS %s's channel is not loaded", CORE) return end
+        local req = 'settings-set:{"mod":"' .. WAYPOINTS .. '","key":"onRevive","value":"' .. value .. '"}'
+        local ok, reply = pcall(function()
+            local r = cdo[CORE .. "_Call"](cdo, req)
+            if type(r) == "userdata" then r = r:ToString() end
+            return r
+        end)
+        reply = ok and tostring(reply) or ("call failed: " .. tostring(reply))
+        say("SETTINGS onRevive=%s via settings-set reply=%s", value, reply:sub(1, 200))
+        check(ok and reply:sub(1, 3) == "ok:", "SETTINGS onRevive=%s accepted by %s's settings service", value, CORE)
     end)
 end
 
