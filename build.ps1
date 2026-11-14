@@ -7,7 +7,7 @@
   byte) and Mods/<name>/Scripts/ with the Lua files deploy.ps1 installs (deploy-lib.ps1 $ModScripts). No settings
   file: Nucleus's settings service uses mod.json's defaults until the player changes a value (then it writes
   Mods/<name>/settings.json in the game), and the test-only Scripts/dev.lua never ships. No DLL and no pak: the mod is Lua only, and it never ships any of core's files.
-  Never touches a game copy. Exit 0 on success; a missing source file or a bad mod.json setting stops it (exit 1).
+  Never touches a game copy. Exit 0 on success; a missing source file, a bad mod.json name or a stray settings file stops it (exit 1). Settings declarations are checked by Nucleus at run time, not here.
 .EXAMPLE
   ./build.ps1
 #>
