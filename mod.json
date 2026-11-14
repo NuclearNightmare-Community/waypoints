@@ -9,5 +9,6 @@
   "settings": {
     "onRevive": { "type": "enum", "values": [ "restore", "clear" ], "default": "restore",
                   "label": "After a revive, your map waypoints", "changeable": "anytime" }
-  }
+  },
+  "license": "MIT"
 }
