@@ -2,7 +2,7 @@
 
 A Nuclear Nightmare mod (UE4SS Lua, on the Nucleus core) for your Journal map waypoints: **Mark all** and **Clear all** buttons on the map, and your waypoints back after a revive.
 
-**0.2.0** (spec `_bmad-output/specs/spec-markers-v1/` in the workspace, stories 2, 3 and 5): the revive fix plus the two buttons, on Nucleus 0.6.0 or newer, game V8.2.1 (build 26512322). It is the first release.
+**0.2.0** (spec `_bmad-output/specs/spec-markers-v1/` in the workspace, stories 2, 3 and 5): the revive fix plus the two buttons, on Nucleus 0.6.0 or newer, game V8.2.1 (build 26512322). It is the first release. License: MIT (`LICENSE`); changes: `CHANGELOG.md`; `build.ps1` stages the release package for the workspace's `tools/release/release.ps1`.
 
 ## What it does
 
