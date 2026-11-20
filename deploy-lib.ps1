@@ -136,6 +136,8 @@ function ConvertTo-SettingsJson {
 # ConvertTo-DevLua [-DebugLog] [-Profile] -> the text of Scripts/dev.lua (test-only flags; deploy.ps1 -Test writes it,
 # the mod reads it as text and never runs it), or $null when neither flag is on.
 function ConvertTo-DevLua {
+    # -Profile is the flag's public name (deploy.ps1 -Profile); it shadows $PROFILE only inside this function.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidAssignmentToAutomaticVariable', 'Profile', Justification = 'public parameter name')]
     param([switch] $DebugLog, [switch] $Profile)
     $parts = @()
     if ($DebugLog) { $parts += 'debug = true' }
