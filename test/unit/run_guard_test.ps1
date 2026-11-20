@@ -11,7 +11,7 @@ $repo = Split-Path (Split-Path $PSScriptRoot)
 # This repo's group in tools/run-guard/test-mods.json, its own driver, and another runner's driver.
 $Owner = 'waypoints'
 $Own = @('WaypointsDriver')
-$Foreign = 'ClockDriver'; $ForeignRepo = 'clock'
+$Foreign = 'HudClockDriver'; $ForeignRepo = 'hud-clock'
 $AlsoForeign = @()
 $RunArgs = @()
 $Vm = $true
@@ -79,7 +79,7 @@ try {
 
     # Its own drivers (and disabled foreign ones, shipped mods, unknown mods) pass the guard; the run then stops on the
     # fake copy (not a game) before anything could launch.
-    $inst = New-Copy (@('Nucleus : 1', 'Clock : 1', 'Waypoints : 1', 'Difficulty : 1', 'SomeoneElsesMod : 1', "$Foreign : 0", "; $Foreign : 1") + @($Own | ForEach-Object { "$_ : 1" }))
+    $inst = New-Copy (@('Nucleus : 1', 'HudClock : 1', 'Waypoints : 1', 'CustomDifficulty : 1', 'SomeoneElsesMod : 1', "$Foreign : 0", "; $Foreign : 1") + @($Own | ForEach-Object { "$_ : 1" }))
     $r = Invoke-Run $inst
     Ok ($r.Out -notmatch 'refused: other test mods' -and $r.Out -notmatch 'warning: other test mods') 'own drivers: no refusal' $r.Out
     Ok ($r.Code -ne 0) 'own drivers: the fake copy still stops the run' "exit $($r.Code)"
