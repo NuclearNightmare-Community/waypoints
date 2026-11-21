@@ -113,7 +113,7 @@ Eq $m.settings.onRevive.label 'After a revive, your map waypoints' 'mod.json: th
 Eq $m.settings.onRevive.changeable 'anytime' 'mod.json: changeable anytime'
 Eq (@($m.settings.onRevive.values) -join ',') 'restore,clear' 'mod.json: values restore, clear'
 Eq $m.settings.onRevive.default 'restore' 'mod.json: default restore'
-Ok ($m.id -eq 'nuclearnightmare-community.waypoints' -and $m.name -eq 'Waypoints' -and $m.version -eq '0.3.0' -and $m.scope -eq 'client') 'mod.json: id, name, version 0.3.0, scope'
+Ok ($m.id -eq 'nuclearnightmare-community.waypoints' -and $m.name -eq 'Waypoints' -and $m.version -eq '0.3.1' -and $m.scope -eq 'client') 'mod.json: id, name, version 0.3.0, scope'
 Ok ($m.dependsOn[0].id -eq 'nuclearnightmare-community.nucleus' -and $m.dependsOn[0].version -eq '>=0.9.0') 'mod.json: dependsOn nuclearnightmare-community.nucleus >=0.9.0 (a minimum, core story 18; core.settings)'
 Ok ($m.ue4ss -eq 'v3.0.1-1181-g83330635' -and $m.game.version -eq 'V8.2.3' -and $m.game.build -eq '26601774') 'mod.json: ue4ss and game build (V8.2.3 / 26601774)'
 # The runtime need in main.lua equals dependsOn's minimum.
