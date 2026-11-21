@@ -232,3 +232,7 @@ The kill (V8.1.5+; on V8.1.2 it was `DeathEvent()`, which no longer kills) is on
 - A Mark all whose click spawns a satellite waypoint is counted by the flag's `Selected` turning true (the satellite handler keeps no actor reference); `waypoints=` in `MARKALL` is the earlier actors still alive plus one per successful click, not a second `FindAllOf`.
 
 Files to add to the workspace's `tools/diff-dumps.watch.json` when Waypoints ships: `flag-mechanics.md`, "Hooks and calls the mod relies on", plus `InventoryUI_C.Player`, `AActor:IsActorBeingDestroyed`, `GameplayStatics:BeginDeferredActorSpawnFromClass`/`FinishSpawningActor`. The Journal map symbols the buttons use (`MapUI_C.Satelite`, `SateliteUI_C`'s `Selected`, `Button_28` and click handler) are in it.
+
+## Feedback
+
+Bug reports, ideas and questions go to [NuclearNightmare-Community/feedback](https://github.com/NuclearNightmare-Community/feedback). For a security problem, please report it privately: see its [SECURITY.md](https://github.com/NuclearNightmare-Community/feedback/blob/main/SECURITY.md).
