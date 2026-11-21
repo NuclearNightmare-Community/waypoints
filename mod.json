@@ -1,9 +1,10 @@
 {
   "id": "nuclearnightmare-community.waypoints",
   "name": "Waypoints",
-  "description": "Mark all and Clear all buttons on the Journal map, and your waypoints back after a revive.",
+  "displayName": "Map Waypoints+",
+  "description": "Adds \"Mark all\" and \"Clear all\" buttons to the map to immediately mark and clear waypoints.",
   "categories": ["qol", "ui"],
-  "version": "0.3.0",
+  "version": "0.3.1",
   "scope": "client",
   "game": { "version": "V8.2.3", "build": "26601774" },
   "ue4ss": "v3.0.1-1181-g83330635",
